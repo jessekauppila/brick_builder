@@ -10,6 +10,10 @@ export type BrickRecord = {
   position: [number, number, number];
   size: [number, number, number];
   color: string;
+  builderId?: string | null;
+  shapeId?: string | null;
+  placementId?: string | null;
+  tick?: number | null;
 };
 
 function InstancedBricks({ bricks }: { bricks: BrickRecord[] }) {
@@ -93,10 +97,18 @@ function InstancedBricks({ bricks }: { bricks: BrickRecord[] }) {
   );
 }
 
-export function BrickPreviewCanvas({ bricks }: { bricks: BrickRecord[] }) {
+export function BrickPreviewCanvas({
+  bricks,
+  className = "",
+}: {
+  bricks: BrickRecord[];
+  className?: string;
+}) {
   if (bricks.length === 0) {
     return (
-      <div className="flex h-[480px] items-center justify-center rounded-3xl border border-dashed border-white/15 bg-black/30 text-sm text-zinc-400">
+      <div
+        className={`flex h-[480px] items-center justify-center rounded-3xl border border-dashed border-white/15 bg-black/30 text-sm text-zinc-400 ${className}`}
+      >
         Generate a model to preview it in Three.js.
       </div>
     );
@@ -109,7 +121,9 @@ export function BrickPreviewCanvas({ bricks }: { bricks: BrickRecord[] }) {
   }, 40);
 
   return (
-    <div className="h-[480px] overflow-hidden rounded-3xl border border-white/10 bg-[#050816] shadow-2xl shadow-black/30">
+    <div
+      className={`h-[480px] overflow-hidden rounded-3xl border border-white/10 bg-[#050816] shadow-2xl shadow-black/30 ${className}`}
+    >
       <Canvas
         camera={{ position: [maxDimension * 3, maxDimension * 2, maxDimension * 3], fov: 45 }}
       >

@@ -1,3 +1,4 @@
+from .builder_agent import BuilderAgent
 from .brick_agent import BrickAgent
 from .brick_model import (
     DEFAULT_TOTAL_STEPS,
@@ -11,6 +12,7 @@ from .brick_model import (
 )
 
 __all__ = [
+    "BuilderAgent",
     "BrickAgent",
     "BuilderConfig",
     "BrickModel",

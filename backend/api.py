@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 try:
+    from .simulation.builder_agent import list_continuity_modes, list_failure_policies
     from .simulation.brick_model import (
         EXPORTS_DIR,
         default_builder_configs,
@@ -18,6 +19,7 @@ try:
     from .simulation.placement_rules import list_placement_rules
     from .simulation.shapes import list_shapes
 except ImportError:
+    from simulation.builder_agent import list_continuity_modes, list_failure_policies
     from simulation.brick_model import (
         EXPORTS_DIR,
         default_builder_configs,
@@ -48,6 +50,9 @@ class GenerateRequest(BaseModel):
         startAnchor: tuple[int, int, int] = (0, 0, 0)
         placementRuleId: str = "alternating_sideways_vertical"
         maxPlacements: int = Field(default=200, ge=0, le=2000)
+        failurePolicy: str = "backtrack"
+        continuityMode: str = "strict"
+        maxBacktrackDepth: Optional[int] = Field(default=None, ge=1, le=5000)
 
     totalSteps: int = Field(default=200, ge=1, le=2000)
     cubeCage: int = Field(default=200, ge=10, le=5000)
@@ -79,6 +84,8 @@ def get_catalog():
     return {
         "shapes": list_shapes(),
         "placementRules": list_placement_rules(),
+        "failurePolicies": list_failure_policies(),
+        "continuityModes": list_continuity_modes(),
         "defaultBuilders": [builder.to_dict() for builder in default_builder_configs()],
     }
 
@@ -105,6 +112,9 @@ def generate_model(payload: GenerateRequest, request: Request):
                 "startAnchor": builder.startAnchor,
                 "placementRuleId": builder.placementRuleId,
                 "maxPlacements": builder.maxPlacements,
+                "failurePolicy": builder.failurePolicy,
+                "continuityMode": builder.continuityMode,
+                "maxBacktrackDepth": builder.maxBacktrackDepth,
             }
             for builder in payload.builders
         ]

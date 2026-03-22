@@ -11,6 +11,9 @@ type BuilderInput = {
   startAnchor: [string, string, string];
   placementRuleId: string;
   maxPlacements: string;
+  failurePolicy: string;
+  continuityMode: string;
+  maxBacktrackDepth: string;
 };
 
 type CatalogOption = {
@@ -21,6 +24,8 @@ type CatalogOption = {
 type CatalogResponse = {
   shapes: CatalogOption[];
   placementRules: CatalogOption[];
+  failurePolicies: CatalogOption[];
+  continuityModes: CatalogOption[];
   defaultBuilders: {
     id: string;
     color: string;
@@ -28,7 +33,35 @@ type CatalogResponse = {
     startAnchor: [number, number, number];
     placementRuleId: string;
     maxPlacements: number;
+    failurePolicy: string;
+    continuityMode: string;
+    maxBacktrackDepth: number | null;
   }[];
+};
+
+type BuilderRuntimeState = {
+  id: string;
+  status: string;
+  placementCount: number;
+  maxPlacements: number;
+  failurePolicy: string;
+  continuityMode: string;
+  maxBacktrackDepth: number | null;
+  lastAnchor: [number, number, number] | null;
+  lastOrientation: string | null;
+  lastAction: string;
+  blockedReason: string | null;
+};
+
+type TraceEvent = {
+  tick: number;
+  builderId: string;
+  action: string;
+  message: string;
+  placementId: string | null;
+  strategy: string | null;
+  referenceCell: [number, number, number] | null;
+  status: string | null;
 };
 
 type SimulationResponse = {
@@ -50,8 +83,13 @@ type SimulationResponse = {
     startAnchor: [number, number, number];
     placementRuleId: string;
     maxPlacements: number;
+    failurePolicy: string;
+    continuityMode: string;
+    maxBacktrackDepth: number | null;
   }[];
+  builderStates: BuilderRuntimeState[];
   bricks: BrickRecord[];
+  trace: TraceEvent[];
   scad: string;
   downloadUrl: string | null;
   jsonDownloadUrl: string | null;
@@ -70,6 +108,13 @@ const DEFAULT_CATALOG: CatalogResponse = {
       label: "Alternating Sideways / Vertical",
     },
   ],
+  failurePolicies: [
+    { id: "backtrack", label: "Backtrack Through History" },
+    { id: "stop", label: "Stop Builder" },
+    { id: "skip", label: "Skip Tick" },
+    { id: "fallback_random", label: "Fallback To Random Placement" },
+  ],
+  continuityModes: [{ id: "strict", label: "Strict Continuity" }],
   defaultBuilders: [
     {
       id: "red",
@@ -78,6 +123,9 @@ const DEFAULT_CATALOG: CatalogResponse = {
       startAnchor: [0, 0, 0],
       placementRuleId: "alternating_sideways_vertical",
       maxPlacements: 200,
+      failurePolicy: "backtrack",
+      continuityMode: "strict",
+      maxBacktrackDepth: 200,
     },
     {
       id: "blue",
@@ -86,6 +134,9 @@ const DEFAULT_CATALOG: CatalogResponse = {
       startAnchor: [40, 0, 0],
       placementRuleId: "alternating_sideways_vertical",
       maxPlacements: 200,
+      failurePolicy: "backtrack",
+      continuityMode: "strict",
+      maxBacktrackDepth: 200,
     },
   ],
 };
@@ -98,6 +149,10 @@ function toBuilderInput(builder: CatalogResponse["defaultBuilders"][number]): Bu
     startAnchor: builder.startAnchor.map(String) as [string, string, string],
     placementRuleId: builder.placementRuleId,
     maxPlacements: String(builder.maxPlacements),
+    failurePolicy: builder.failurePolicy,
+    continuityMode: builder.continuityMode,
+    maxBacktrackDepth:
+      builder.maxBacktrackDepth === null ? "" : String(builder.maxBacktrackDepth),
   };
 }
 
@@ -110,6 +165,9 @@ function createBuilder(index: number): BuilderInput {
     placementRuleId:
       DEFAULT_CATALOG.placementRules[0]?.id ?? "alternating_sideways_vertical",
     maxPlacements: "50",
+    failurePolicy: DEFAULT_CATALOG.failurePolicies[0]?.id ?? "backtrack",
+    continuityMode: DEFAULT_CATALOG.continuityModes[0]?.id ?? "strict",
+    maxBacktrackDepth: "50",
   };
 }
 
@@ -123,6 +181,7 @@ export function BrickBuilderStudio() {
   const [builders, setBuilders] = useState<BuilderInput[]>(
     DEFAULT_CATALOG.defaultBuilders.map(toBuilderInput),
   );
+  const [selectedBuilderFilter, setSelectedBuilderFilter] = useState("all");
   const [result, setResult] = useState<SimulationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -181,6 +240,23 @@ export function BrickBuilderStudio() {
     }
   }, [result]);
 
+  const filteredBricks = useMemo(() => {
+    if (!result) {
+      return [];
+    }
+    if (selectedBuilderFilter === "all") {
+      return result.bricks;
+    }
+    return result.bricks.filter(
+      (brick) => brick.builderId === selectedBuilderFilter,
+    );
+  }, [result, selectedBuilderFilter]);
+
+  const recentTrace = useMemo(
+    () => result?.trace.slice(-20).reverse() ?? [],
+    [result],
+  );
+
   function updateBuilder(index: number, patch: Partial<BuilderInput>) {
     setBuilders((currentBuilders) =>
       currentBuilders.map((builder, builderIndex) =>
@@ -217,6 +293,12 @@ export function BrickBuilderStudio() {
             ],
             placementRuleId: builder.placementRuleId,
             maxPlacements: Number(builder.maxPlacements),
+            failurePolicy: builder.failurePolicy,
+            continuityMode: builder.continuityMode,
+            maxBacktrackDepth:
+              builder.maxBacktrackDepth === ""
+                ? null
+                : Number(builder.maxBacktrackDepth),
           })),
         }),
       });
@@ -260,8 +342,8 @@ export function BrickBuilderStudio() {
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[420px,minmax(0,1fr)]">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-black/20 backdrop-blur">
+        <section className="grid items-start gap-6 lg:grid-cols-[420px,minmax(0,1fr)] xl:grid-cols-[440px,minmax(0,1fr)]">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-black/20 backdrop-blur lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
             <form className="space-y-5" onSubmit={handleSubmit}>
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-zinc-200" htmlFor="totalSteps">
@@ -455,6 +537,60 @@ export function BrickBuilderStudio() {
                             }
                           />
                         </label>
+
+                        <label className="space-y-2 text-sm text-zinc-200">
+                          <span className="block font-medium">Failure policy</span>
+                          <select
+                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
+                            value={builder.failurePolicy}
+                            onChange={(event) =>
+                              updateBuilder(index, {
+                                failurePolicy: event.target.value,
+                              })
+                            }
+                          >
+                            {catalog.failurePolicies.map((policy) => (
+                              <option key={policy.id} value={policy.id}>
+                                {policy.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="space-y-2 text-sm text-zinc-200">
+                          <span className="block font-medium">Continuity</span>
+                          <select
+                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
+                            value={builder.continuityMode}
+                            onChange={(event) =>
+                              updateBuilder(index, {
+                                continuityMode: event.target.value,
+                              })
+                            }
+                          >
+                            {catalog.continuityModes.map((mode) => (
+                              <option key={mode.id} value={mode.id}>
+                                {mode.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="space-y-2 text-sm text-zinc-200">
+                          <span className="block font-medium">Backtrack depth</span>
+                          <input
+                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
+                            min="1"
+                            max="5000"
+                            type="number"
+                            value={builder.maxBacktrackDepth}
+                            onChange={(event) =>
+                              updateBuilder(index, {
+                                maxBacktrackDepth: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
                       </div>
 
                       <div className="grid gap-3 sm:grid-cols-3">
@@ -574,6 +710,46 @@ export function BrickBuilderStudio() {
                       This run rendered in Three.js only and did not save export files.
                     </p>
                   )}
+
+                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                    <summary className="cursor-pointer font-medium text-zinc-100">
+                      Builder configs used
+                    </summary>
+                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
+                      {JSON.stringify(result.builders, null, 2)}
+                    </pre>
+                  </details>
+
+                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                    <summary className="cursor-pointer font-medium text-zinc-100">
+                      Builder runtime state
+                    </summary>
+                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
+                      {JSON.stringify(result.builderStates, null, 2)}
+                    </pre>
+                  </details>
+
+                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                    <summary className="cursor-pointer font-medium text-zinc-100">
+                      Recent trace events
+                    </summary>
+                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
+                      {JSON.stringify(recentTrace, null, 2)}
+                    </pre>
+                  </details>
+
+                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                    <summary className="cursor-pointer font-medium text-zinc-100">
+                      Export paths and raw response
+                    </summary>
+                    <div className="mt-3 space-y-2 text-xs leading-6 text-zinc-300">
+                      <p>SCAD path: {result.metadata.outputPath ?? "not saved"}</p>
+                      <p>JSON path: {result.metadata.jsonOutputPath ?? "not saved"}</p>
+                    </div>
+                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
+                      {JSON.stringify(result, null, 2)}
+                    </pre>
+                  </details>
                 </div>
               ) : (
                 <p className="text-zinc-400">
@@ -584,11 +760,35 @@ export function BrickBuilderStudio() {
           </div>
 
           <div className="space-y-4">
-            <BrickPreviewCanvas bricks={result?.bricks ?? []} />
+            <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-white/10 bg-white/5 p-4 text-sm text-zinc-300 backdrop-blur">
+              <label className="flex items-center gap-3">
+                <span className="font-medium text-zinc-100">Viewer filter</span>
+                <select
+                  className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-zinc-50 outline-none transition focus:border-sky-400"
+                  value={selectedBuilderFilter}
+                  onChange={(event) => setSelectedBuilderFilter(event.target.value)}
+                >
+                  <option value="all">All builders</option>
+                  {result?.builders.map((builder) => (
+                    <option key={builder.id} value={builder.id}>
+                      {builder.id}
+                    </option>
+                  )) ?? null}
+                </select>
+              </label>
+              <p className="text-zinc-400">
+                Showing {filteredBricks.length} cube{filteredBricks.length === 1 ? "" : "s"}.
+              </p>
+            </div>
+            <BrickPreviewCanvas
+              bricks={filteredBricks}
+              className="lg:h-[calc(100vh-16rem)] lg:min-h-[620px]"
+            />
             <div className="rounded-3xl border border-white/10 bg-white/5 p-5 text-sm leading-7 text-zinc-300 backdrop-blur">
               <p>
-                The live preview still renders cube instances, but each cluster now comes
-                from a shape placement owned by a specific builder rule set.
+                The live preview renders the committed cube instances from the simulation.
+                Filter by builder to inspect continuity and use the runtime state and trace
+                panels to understand why a builder placed, skipped, backtracked, or stopped.
               </p>
             </div>
           </div>
