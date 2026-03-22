@@ -26,6 +26,7 @@ class BuilderConfig:
     shape_id: str = "bar_2x1"
     start_anchor: Vector3 = (0, 0, 0)
     placement_rule_id: str = "alternating_sideways_vertical"
+    max_placements: int = DEFAULT_TOTAL_STEPS
 
     def to_dict(self):
         return {
@@ -34,6 +35,7 @@ class BuilderConfig:
             "shapeId": self.shape_id,
             "startAnchor": list(self.start_anchor),
             "placementRuleId": self.placement_rule_id,
+            "maxPlacements": self.max_placements,
         }
 
 
@@ -75,12 +77,20 @@ class BrickModel:
     def run(self):
         for tick in range(self.total_steps):
             self.log(f"Tick {tick}")
+            placements_this_tick = 0
             for builder_state in self.builder_states:
-                self._run_builder_step(builder_state, tick)
+                if self._run_builder_step(builder_state, tick):
+                    placements_this_tick += 1
+            if placements_this_tick == 0:
+                self.log("No builders were eligible to place; ending run early.")
+                break
         return self
 
     def _run_builder_step(self, builder_state: BuilderState, tick: int):
         config = builder_state.config
+        if builder_state.placement_count >= config.max_placements:
+            return False
+
         shape = get_shape(config.shape_id)
         candidates = build_candidates(
             placement_rule_id=config.placement_rule_id,
@@ -138,6 +148,7 @@ class BrickModel:
             f"Builder {config.id} placed {config.shape_id} at {chosen_anchor} "
             f"using {placement_mode} ({chosen_orientation})."
         )
+        return True
 
     def _normalize_builders(self, builders):
         normalized = builders or default_builder_configs(self.brick_unit)
@@ -161,6 +172,10 @@ class BrickModel:
                             "placementRuleId", "alternating_sideways_vertical"
                         ),
                     ),
+                    max_placements=builder.get(
+                        "max_placements",
+                        builder.get("maxPlacements", self.total_steps),
+                    ),
                 )
 
             if config.id in seen_ids:
@@ -170,6 +185,10 @@ class BrickModel:
             if len(config.start_anchor) != 3:
                 raise ValueError(
                     f"Builder '{config.id}' must define a 3-value start_anchor."
+                )
+            if config.max_placements < 0:
+                raise ValueError(
+                    f"Builder '{config.id}' must define a non-negative max_placements."
                 )
 
             builder_configs.append(config)
@@ -215,6 +234,7 @@ def default_builder_configs(brick_unit=10):
             shape_id="bar_2x1",
             start_anchor=(0, 0, 0),
             placement_rule_id="alternating_sideways_vertical",
+            max_placements=DEFAULT_TOTAL_STEPS,
         ),
         BuilderConfig(
             id="blue",
@@ -222,6 +242,7 @@ def default_builder_configs(brick_unit=10):
             shape_id="bar_2x1",
             start_anchor=(brick_unit * 4, 0, 0),
             placement_rule_id="alternating_sideways_vertical",
+            max_placements=DEFAULT_TOTAL_STEPS,
         ),
     ]
 
@@ -242,6 +263,7 @@ def write_json(simulation, output_path):
 
 def run_simulation(
     total_steps=DEFAULT_TOTAL_STEPS,
+    cube_cage=200,
     scad_output_path=DEFAULT_SCAD_PATH,
     json_output_path=DEFAULT_JSON_PATH,
     seed=None,
@@ -250,7 +272,13 @@ def run_simulation(
 ):
     ensure_exports_dir()
     rng = random.Random(seed)
-    model = BrickModel(total_steps, builders=builders, rng=rng, verbose=verbose)
+    model = BrickModel(
+        total_steps,
+        cube_cage=cube_cage,
+        builders=builders,
+        rng=rng,
+        verbose=verbose,
+    )
     model.run()
 
     simulation = model.to_dict()

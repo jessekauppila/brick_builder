@@ -10,6 +10,7 @@ type BuilderInput = {
   shapeId: string;
   startAnchor: [string, string, string];
   placementRuleId: string;
+  maxPlacements: string;
 };
 
 type CatalogOption = {
@@ -26,6 +27,7 @@ type CatalogResponse = {
     shapeId: string;
     startAnchor: [number, number, number];
     placementRuleId: string;
+    maxPlacements: number;
   }[];
 };
 
@@ -47,6 +49,7 @@ type SimulationResponse = {
     shapeId: string;
     startAnchor: [number, number, number];
     placementRuleId: string;
+    maxPlacements: number;
   }[];
   bricks: BrickRecord[];
   scad: string;
@@ -74,6 +77,7 @@ const DEFAULT_CATALOG: CatalogResponse = {
       shapeId: "bar_2x1",
       startAnchor: [0, 0, 0],
       placementRuleId: "alternating_sideways_vertical",
+      maxPlacements: 200,
     },
     {
       id: "blue",
@@ -81,6 +85,7 @@ const DEFAULT_CATALOG: CatalogResponse = {
       shapeId: "bar_2x1",
       startAnchor: [40, 0, 0],
       placementRuleId: "alternating_sideways_vertical",
+      maxPlacements: 200,
     },
   ],
 };
@@ -92,6 +97,7 @@ function toBuilderInput(builder: CatalogResponse["defaultBuilders"][number]): Bu
     shapeId: builder.shapeId,
     startAnchor: builder.startAnchor.map(String) as [string, string, string],
     placementRuleId: builder.placementRuleId,
+    maxPlacements: String(builder.maxPlacements),
   };
 }
 
@@ -103,11 +109,13 @@ function createBuilder(index: number): BuilderInput {
     startAnchor: ["0", "0", "0"],
     placementRuleId:
       DEFAULT_CATALOG.placementRules[0]?.id ?? "alternating_sideways_vertical",
+    maxPlacements: "50",
   };
 }
 
 export function BrickBuilderStudio() {
   const [totalSteps, setTotalSteps] = useState("200");
+  const [cubeCage, setCubeCage] = useState("200");
   const [seed, setSeed] = useState("");
   const [fileName, setFileName] = useState("sample.scad");
   const [saveScad, setSaveScad] = useState(true);
@@ -194,6 +202,7 @@ export function BrickBuilderStudio() {
         },
         body: JSON.stringify({
           totalSteps: Number(totalSteps),
+          cubeCage: Number(cubeCage),
           seed: seed === "" ? null : Number(seed),
           saveScad,
           fileName,
@@ -207,6 +216,7 @@ export function BrickBuilderStudio() {
               number,
             ],
             placementRuleId: builder.placementRuleId,
+            maxPlacements: Number(builder.maxPlacements),
           })),
         }),
       });
@@ -279,6 +289,21 @@ export function BrickBuilderStudio() {
                   type="number"
                   value={seed}
                   onChange={(event) => setSeed(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-zinc-200" htmlFor="cubeCage">
+                  Cage size
+                </label>
+                <input
+                  id="cubeCage"
+                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
+                  min="10"
+                  max="5000"
+                  type="number"
+                  value={cubeCage}
+                  onChange={(event) => setCubeCage(event.target.value)}
                 />
               </div>
 
@@ -413,6 +438,22 @@ export function BrickBuilderStudio() {
                               </option>
                             ))}
                           </select>
+                        </label>
+
+                        <label className="space-y-2 text-sm text-zinc-200">
+                          <span className="block font-medium">Placements</span>
+                          <input
+                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
+                            min="0"
+                            max="2000"
+                            type="number"
+                            value={builder.maxPlacements}
+                            onChange={(event) =>
+                              updateBuilder(index, {
+                                maxPlacements: event.target.value,
+                              })
+                            }
+                          />
                         </label>
                       </div>
 

@@ -47,8 +47,10 @@ class GenerateRequest(BaseModel):
         shapeId: str = "bar_2x1"
         startAnchor: tuple[int, int, int] = (0, 0, 0)
         placementRuleId: str = "alternating_sideways_vertical"
+        maxPlacements: int = Field(default=200, ge=0, le=2000)
 
     totalSteps: int = Field(default=200, ge=1, le=2000)
+    cubeCage: int = Field(default=200, ge=10, le=5000)
     seed: Optional[int] = None
     saveScad: bool = True
     saveJson: bool = True
@@ -91,6 +93,7 @@ def generate_model(payload: GenerateRequest, request: Request):
     )
     simulation = run_simulation(
         total_steps=payload.totalSteps,
+        cube_cage=payload.cubeCage,
         scad_output_path=scad_output_path,
         json_output_path=json_output_path,
         seed=payload.seed,
@@ -101,6 +104,7 @@ def generate_model(payload: GenerateRequest, request: Request):
                 "shapeId": builder.shapeId,
                 "startAnchor": builder.startAnchor,
                 "placementRuleId": builder.placementRuleId,
+                "maxPlacements": builder.maxPlacements,
             }
             for builder in payload.builders
         ]
