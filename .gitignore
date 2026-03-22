@@ -20,6 +20,14 @@
 # production
 /build
 
+# python
+.venv/
+venv/
+backend/exports/*
+!backend/exports/.gitkeep
+backend/*.scad
+backend/*.json
+
 # misc
 .DS_Store
 *.pem

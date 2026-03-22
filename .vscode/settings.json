@@ -1,0 +1,22 @@
+{
+  "files.watcherExclude": {
+    "**/Loupe-UX/**": true,
+    "**/.venv/**": true,
+    "**/.next/**": true,
+    "**/node_modules/**": true,
+    "**/backend/exports/**": true
+  },
+  "search.exclude": {
+    "**/Loupe-UX/**": true,
+    "**/.venv/**": true,
+    "**/.next/**": true,
+    "**/node_modules/**": true,
+    "**/backend/exports/**": true
+  },
+  "files.exclude": {
+    "Loupe-UX": true,
+    ".venv": true,
+    ".next": true,
+    "backend/exports": true
+  }
+}

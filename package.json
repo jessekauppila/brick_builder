@@ -3,15 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack --hostname 127.0.0.1",
+    "dev:python": ".venv/bin/python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000 --app-dir .",
     "build": "next build",
-    "start": "next start",
+    "preview": "next build && next start --hostname 127.0.0.1",
+    "start": "next start --hostname 127.0.0.1",
     "lint": "eslint"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
     "next": "16.2.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

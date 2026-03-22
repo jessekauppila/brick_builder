@@ -1,22 +1,128 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is a [Next.js](https://nextjs.org) app with a local Python API for an agent-based brick simulation.
 
-## Getting Started
+## Local workflow
 
-First, run the development server:
+The current setup is local-first:
+
+- Python remains the source of truth for the brick-generation algorithm.
+- The Next.js app provides the button, controls, and Three.js preview.
+- The Python API returns brick-instance JSON for fast browser rendering.
+- The Python API can save JSON and `.scad` exports into `backend/exports/`.
+
+## Install dependencies
+
+### Frontend
+
+From the repository root:
+
+```bash
+npm install
+```
+
+### Python backend
+
+Create a virtual environment and install the backend packages:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r backend/requirements.txt
+```
+
+## Run the local app
+
+Start the Python API in one terminal:
+
+```bash
+npm run dev:python
+```
+
+That serves the generator at [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+Start the Next.js app in a second terminal:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`npm run dev` uses `next dev --webpack` for local stability.
+
+If you are mostly iterating on the Python model and want the least fragile frontend option, use:
+
+```bash
+npm run preview
+```
+
+That runs a production-style frontend without file watching.
+
+## What the app does now
+
+When you click **Generate model** in the UI:
+
+1. The React app sends generation settings to the local Python API.
+2. The Python service runs the brick model from `backend/Brick_Builder_1.py`.
+3. The service returns structured JSON describing each brick:
+   - `id`
+   - `position`
+   - `size`
+   - `color`
+4. The browser renders those bricks in a Three.js preview.
+5. The Python service writes exports into `backend/exports/` and exposes download links for saved artifacts.
+
+## Python files
+
+### `backend/api.py`
+
+Runs the local FastAPI service used by the frontend.
+
+Current endpoints:
+
+- `GET /health`
+- `POST /generate`
+- `GET /exports/{file_name}`
+
+### `backend/simulation/brick_agent.py`
+
+Defines the Mesa agent that stores each brick's position, size, and color.
+
+### `backend/simulation/brick_model.py`
+
+Runs the brick-placement simulation and supports:
+
+- returning structured brick JSON for the web preview
+- writing JSON exports
+- writing OpenSCAD exports when requested
+
+Running it directly still works:
+
+```bash
+python backend/Brick_Builder_1.py
+```
+
+By default it writes:
+
+- `backend/exports/sample.json`
+- `backend/exports/sample.scad`
+
+### `backend/simulation/scad_export.py`
+
+Contains the OpenSCAD export helper used by the simulation.
+
+### `backend/exports/`
+
+Stores generated artifacts:
+
+- JSON exports for debugging or manual inspection
+- SCAD exports for OpenSCAD
+
+## Notes
+
+- `backend/exports/sample.scad` is an OpenSCAD source file, not JSON or CSV.
+- The live Three.js preview does not parse `.scad`; it uses the JSON brick data returned by Python.
+- If you want the frontend to call a different Python host later, set `NEXT_PUBLIC_BRICK_API_URL` in `.env.local`.
+- The Python API now builds download URLs from the incoming request, so the same frontend contract can move from local to remote hosting more easily.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

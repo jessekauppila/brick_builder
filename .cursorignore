@@ -1,0 +1,5 @@
+Loupe-UX/**
+.venv/**
+.next/**
+node_modules/**
+backend/exports/**
