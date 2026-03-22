@@ -9,9 +9,23 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 try:
-    from .simulation.brick_model import EXPORTS_DIR, normalize_export_stem, run_simulation
+    from .simulation.brick_model import (
+        EXPORTS_DIR,
+        default_builder_configs,
+        normalize_export_stem,
+        run_simulation,
+    )
+    from .simulation.placement_rules import list_placement_rules
+    from .simulation.shapes import list_shapes
 except ImportError:
-    from simulation.brick_model import EXPORTS_DIR, normalize_export_stem, run_simulation
+    from simulation.brick_model import (
+        EXPORTS_DIR,
+        default_builder_configs,
+        normalize_export_stem,
+        run_simulation,
+    )
+    from simulation.placement_rules import list_placement_rules
+    from simulation.shapes import list_shapes
 
 DEFAULT_EXPORT_STEM = "sample"
 
@@ -27,11 +41,19 @@ app.add_middleware(
 
 
 class GenerateRequest(BaseModel):
+    class BuilderRequest(BaseModel):
+        id: str = Field(min_length=1, max_length=50)
+        color: str = Field(default="Red", min_length=1, max_length=50)
+        shapeId: str = "bar_2x1"
+        startAnchor: tuple[int, int, int] = (0, 0, 0)
+        placementRuleId: str = "alternating_sideways_vertical"
+
     totalSteps: int = Field(default=200, ge=1, le=2000)
     seed: Optional[int] = None
     saveScad: bool = True
     saveJson: bool = True
     fileName: str = "sample.scad"
+    builders: Optional[list[BuilderRequest]] = None
 
 
 def resolve_output_path(file_name: str, extension: str) -> Path:
@@ -50,6 +72,15 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/catalog")
+def get_catalog():
+    return {
+        "shapes": list_shapes(),
+        "placementRules": list_placement_rules(),
+        "defaultBuilders": [builder.to_dict() for builder in default_builder_configs()],
+    }
+
+
 @app.post("/generate")
 def generate_model(payload: GenerateRequest, request: Request):
     scad_output_path = (
@@ -63,6 +94,18 @@ def generate_model(payload: GenerateRequest, request: Request):
         scad_output_path=scad_output_path,
         json_output_path=json_output_path,
         seed=payload.seed,
+        builders=[
+            {
+                "id": builder.id,
+                "color": builder.color,
+                "shapeId": builder.shapeId,
+                "startAnchor": builder.startAnchor,
+                "placementRuleId": builder.placementRuleId,
+            }
+            for builder in payload.builders
+        ]
+        if payload.builders is not None
+        else None,
         verbose=False,
     )
     scad_file_name = scad_output_path.name if scad_output_path else None

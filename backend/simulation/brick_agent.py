@@ -1,23 +1,19 @@
-import mesa
+from dataclasses import dataclass
+from typing import Optional
 
 
-class BrickAgent(mesa.Agent):
-    def __init__(
-        self,
-        unique_id,
-        brick_unit,
-        brick_x,
-        brick_y,
-        brick_z,
-        color,
-        model,
-    ):
-        super().__init__(unique_id, model)
-        self.brick_unit = brick_unit
-        self.brick_x = brick_x
-        self.brick_y = brick_y
-        self.brick_z = brick_z
-        self.color = color
+@dataclass
+class BrickAgent:
+    unique_id: int
+    brick_unit: int
+    brick_x: int
+    brick_y: int
+    brick_z: int
+    color: str
+    builder_id: Optional[str] = None
+    shape_id: Optional[str] = None
+    placement_id: Optional[str] = None
+    tick: Optional[int] = None
 
     def to_dict(self):
         return {
@@ -25,11 +21,8 @@ class BrickAgent(mesa.Agent):
             "position": [self.brick_x, self.brick_y, self.brick_z],
             "size": [self.brick_unit, self.brick_unit, self.brick_unit],
             "color": self.color,
+            "builderId": self.builder_id,
+            "shapeId": self.shape_id,
+            "placementId": self.placement_id,
+            "tick": self.tick,
         }
-
-    def step(self):
-        if getattr(self.model, "verbose", False):
-            print(
-                "Brick Agent Created: "
-                f"brick x:{self.brick_x} brick y:{self.brick_y} brick z:{self.brick_z}"
-            )

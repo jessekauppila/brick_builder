@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import dataclass
 from pathlib import Path
-
-import mesa
+from typing import Optional
 
 from .brick_agent import BrickAgent
+from .placement_rules import build_candidates, list_placement_rules
 from .scad_export import build_scad, write_scad
+from .shapes import Vector3, get_shape, list_shapes
+from .world_state import WorldState
 
 EXPORTS_DIR = Path(__file__).resolve().parent.parent / "exports"
 DEFAULT_EXPORT_STEM = "sample"
@@ -16,205 +19,172 @@ DEFAULT_JSON_PATH = EXPORTS_DIR / f"{DEFAULT_EXPORT_STEM}.json"
 DEFAULT_TOTAL_STEPS = 200
 
 
-class BrickModel(mesa.Model):
+@dataclass(frozen=True)
+class BuilderConfig:
+    id: str
+    color: str = "Red"
+    shape_id: str = "bar_2x1"
+    start_anchor: Vector3 = (0, 0, 0)
+    placement_rule_id: str = "alternating_sideways_vertical"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "color": self.color,
+            "shapeId": self.shape_id,
+            "startAnchor": list(self.start_anchor),
+            "placementRuleId": self.placement_rule_id,
+        }
+
+
+@dataclass
+class BuilderState:
+    config: BuilderConfig
+    placement_count: int = 0
+    last_anchor: Optional[Vector3] = None
+    last_orientation: Optional[str] = None
+
+
+class BrickModel:
     def __init__(
         self,
         total_steps,
         brick_unit=10,
         cube_cage=200,
+        builders=None,
+        rng=None,
         verbose=False,
     ):
-        super().__init__()
-        self.schedule = mesa.time.StagedActivation(self)
         self.brick_unit = brick_unit
-        self.brick_x = 0
-        self.brick_y = 0
-        self.brick_z = 0
-        self.new_brick_x = None
-        self.new_brick_y = None
-        self.new_brick_z = None
-        self.step_counter = 0
         self.total_steps = total_steps
         self.cube_cage = cube_cage
         self.verbose = verbose
+        self.rng = rng or random.Random()
+        self.world = WorldState(brick_unit=brick_unit, cube_cage=cube_cage)
+        self.bricks: list[BrickAgent] = []
+        self.next_brick_id = 0
+        self.builder_states = [
+            BuilderState(config=config)
+            for config in self._normalize_builders(builders)
+        ]
 
     def log(self, message):
         if self.verbose:
             print(message)
 
     def run(self):
-        self.design_brick()
-
-        while self.step_counter + 1 < self.total_steps:
-            self.step_counter += 1
-            self.log(f"Step Counter: {self.step_counter}")
-            self.create_new_brick_location(sideways=True)
-            self.design_brick()
-
-            if self.step_counter + 1 >= self.total_steps:
-                break
-
-            self.step_counter += 1
-            self.log(f"Step Counter: {self.step_counter}")
-            self.create_new_brick_location(sideways=False)
-            self.design_brick()
-
+        for tick in range(self.total_steps):
+            self.log(f"Tick {tick}")
+            for builder_state in self.builder_states:
+                self._run_builder_step(builder_state, tick)
         return self
 
-    def design_brick(self, color="Red"):
-        brick = BrickAgent(
-            self.step_counter,
-            self.brick_unit,
-            self.brick_x,
-            self.brick_y,
-            self.brick_z,
-            color,
-            self,
+    def _run_builder_step(self, builder_state: BuilderState, tick: int):
+        config = builder_state.config
+        shape = get_shape(config.shape_id)
+        candidates = build_candidates(
+            placement_rule_id=config.placement_rule_id,
+            previous_anchor=builder_state.last_anchor,
+            previous_orientation=builder_state.last_orientation,
+            start_anchor=config.start_anchor,
+            rng=self.rng,
+            brick_unit=self.brick_unit,
+            local_step=builder_state.placement_count,
         )
-        self.schedule.add(brick)
-        return brick
 
-    def create_new_brick_location(self, sideways=False):
-        if sideways:
-            self.new_brick_x, self.new_brick_y, self.new_brick_z = self.sideways(
-                verbose=self.verbose
-            )
-        else:
-            self.new_brick_x, self.new_brick_y, self.new_brick_z = self.up_or_down(
-                verbose=self.verbose
-            )
+        placement_mode = "fallback"
+        chosen_anchor = None
+        chosen_orientation = None
 
-        max_attempts = 5000
-        attempts = 0
-        while not self.not_touching_and_within_cube():
-            attempts += 1
-            if attempts >= max_attempts:
-                self.log(
-                    "Placement stuck (neighbors occupied or bounds); "
-                    "picking random free cell."
-                )
-                self._pick_random_free_cell()
+        for candidate in candidates:
+            if self.world.can_place(shape, candidate.anchor, candidate.orientation):
+                chosen_anchor = candidate.anchor
+                chosen_orientation = candidate.orientation
+                placement_mode = candidate.mode
                 break
-            if sideways:
-                self.new_brick_x, self.new_brick_y, self.new_brick_z = self.sideways(
-                    verbose=False
-                )
-            else:
-                self.new_brick_x, self.new_brick_y, self.new_brick_z = self.up_or_down(
-                    verbose=False
-                )
 
-        self.brick_x, self.brick_y, self.brick_z = (
-            self.new_brick_x,
-            self.new_brick_y,
-            self.new_brick_z,
-        )
+        if chosen_anchor is None or chosen_orientation is None:
+            self.log(
+                f"Builder {config.id} could not place via {config.placement_rule_id}; "
+                "picking a random free placement."
+            )
+            chosen_anchor, chosen_orientation = self.world.random_free_placement(
+                shape, self.rng
+            )
+
+        occupied_cells = self.world.occupy(shape, chosen_anchor, chosen_orientation)
+        placement_id = f"{config.id}-{builder_state.placement_count}"
+        for brick_x, brick_y, brick_z in occupied_cells:
+            self.bricks.append(
+                BrickAgent(
+                    unique_id=self.next_brick_id,
+                    brick_unit=self.brick_unit,
+                    brick_x=brick_x,
+                    brick_y=brick_y,
+                    brick_z=brick_z,
+                    color=config.color,
+                    builder_id=config.id,
+                    shape_id=config.shape_id,
+                    placement_id=placement_id,
+                    tick=tick,
+                )
+            )
+            self.next_brick_id += 1
+
+        builder_state.last_anchor = chosen_anchor
+        builder_state.last_orientation = chosen_orientation
+        builder_state.placement_count += 1
         self.log(
-            f"New Origin Brick: BrickX: {self.brick_x}, "
-            f"BrickY: {self.brick_y}, BrickZ: {self.brick_z}"
+            f"Builder {config.id} placed {config.shape_id} at {chosen_anchor} "
+            f"using {placement_mode} ({chosen_orientation})."
         )
 
-    def not_touching_and_within_cube(self):
-        nx, ny, nz = self.new_brick_x, self.new_brick_y, self.new_brick_z
-        if nx > self.cube_cage or ny > self.cube_cage or nz > self.cube_cage:
-            return False
-        if nx < -self.cube_cage or ny < -self.cube_cage or nz < -self.cube_cage:
-            return False
-        for agent in self.schedule.agents:
-            if agent.brick_x == nx and agent.brick_y == ny and agent.brick_z == nz:
-                return False
-        return True
+    def _normalize_builders(self, builders):
+        normalized = builders or default_builder_configs(self.brick_unit)
+        builder_configs: list[BuilderConfig] = []
+        seen_ids: set[str] = set()
 
-    def _pick_random_free_cell(self):
-        half = self.cube_cage // self.brick_unit
-        for _ in range(5000):
-            x = random.randint(-half, half) * self.brick_unit
-            y = random.randint(-half, half) * self.brick_unit
-            z = random.randint(-half, half) * self.brick_unit
-            self.new_brick_x, self.new_brick_y, self.new_brick_z = x, y, z
-            if self.not_touching_and_within_cube():
-                return
-        raise RuntimeError(
-            "Could not find a free grid cell inside cube_cage; "
-            "raise cage or reduce steps."
-        )
-
-    def up_or_down(self, verbose=True):
-        for agent in self.schedule.agents:
-            if agent.unique_id == self.step_counter - 1:
-                self.new_brick_x, self.new_brick_y, self.new_brick_z = (
-                    agent.brick_x,
-                    agent.brick_y,
-                    agent.brick_z,
+        for builder in normalized:
+            if isinstance(builder, BuilderConfig):
+                config = builder
+            else:
+                config = BuilderConfig(
+                    id=builder["id"],
+                    color=builder.get("color", "Red"),
+                    shape_id=builder.get("shape_id", builder.get("shapeId", "bar_2x1")),
+                    start_anchor=tuple(
+                        builder.get("start_anchor", builder.get("startAnchor", (0, 0, 0)))
+                    ),
+                    placement_rule_id=builder.get(
+                        "placement_rule_id",
+                        builder.get(
+                            "placementRuleId", "alternating_sideways_vertical"
+                        ),
+                    ),
                 )
 
-                if verbose:
-                    print(
-                        "Previous Brick Origin: "
-                        f"BrickX: {agent.brick_x}, BrickY: {agent.brick_y}, "
-                        f"BrickZ: {agent.brick_z}"
-                    )
+            if config.id in seen_ids:
+                raise ValueError(f"Duplicate builder id '{config.id}'.")
 
-                random_number = random.randint(1, 2)
-                if verbose:
-                    print(f"Random Number: {random_number}")
-                if random_number == 1:
-                    self.new_brick_z += self.brick_unit
-                elif random_number == 2:
-                    self.new_brick_z -= self.brick_unit
-
-                if verbose:
-                    print(
-                        "New Brick1: "
-                        f"BrickX: {self.new_brick_x}, BrickY: {self.new_brick_y}, "
-                        f"BrickZ: {self.new_brick_z}"
-                    )
-
-                return self.new_brick_x, self.new_brick_y, self.new_brick_z
-
-        raise RuntimeError("Previous brick not found for vertical move.")
-
-    def sideways(self, verbose=True):
-        for agent in self.schedule.agents:
-            if agent.unique_id == self.step_counter - 1:
-                self.new_brick_x, self.new_brick_y, self.new_brick_z = (
-                    agent.brick_x,
-                    agent.brick_y,
-                    agent.brick_z,
+            get_shape(config.shape_id)
+            if len(config.start_anchor) != 3:
+                raise ValueError(
+                    f"Builder '{config.id}' must define a 3-value start_anchor."
                 )
 
-                if verbose:
-                    print(
-                        "Previous Brick Origin: "
-                        f"BrickX: {agent.brick_x}, BrickY: {agent.brick_y}, "
-                        f"BrickZ: {agent.brick_z}"
-                    )
+            builder_configs.append(config)
+            seen_ids.add(config.id)
 
-                random_number = random.randint(1, 4)
-                if verbose:
-                    print(f"Random Number: {random_number}")
-                if random_number == 1:
-                    self.new_brick_x += self.brick_unit
-                elif random_number == 2:
-                    self.new_brick_x -= self.brick_unit
-                elif random_number == 3:
-                    self.new_brick_y += self.brick_unit
-                elif random_number == 4:
-                    self.new_brick_y -= self.brick_unit
+        if not builder_configs:
+            raise ValueError("At least one builder config is required.")
 
-                if verbose:
-                    print(
-                        "New Brick1: "
-                        f"BrickX: {self.new_brick_x}, BrickY: {self.new_brick_y}, "
-                        f"BrickZ: {self.new_brick_z}"
-                    )
-
-                return self.new_brick_x, self.new_brick_y, self.new_brick_z
-
-        raise RuntimeError("Previous brick not found for sideways move.")
+        return builder_configs
 
     def get_bricks(self):
-        return sorted(self.schedule.agents, key=lambda agent: agent.unique_id)
+        return sorted(self.bricks, key=lambda agent: agent.unique_id)
+
+    def get_builders(self):
+        return [builder_state.config.to_dict() for builder_state in self.builder_states]
 
     def to_dict(self):
         return {
@@ -222,10 +192,38 @@ class BrickModel(mesa.Model):
                 "totalSteps": self.total_steps,
                 "brickUnit": self.brick_unit,
                 "cubeCage": self.cube_cage,
-                "brickCount": len(self.schedule.agents),
+                "brickCount": len(self.bricks),
+                "builderCount": len(self.builder_states),
+                "placementCount": sum(
+                    builder_state.placement_count for builder_state in self.builder_states
+                ),
             },
+            "builders": self.get_builders(),
             "bricks": [agent.to_dict() for agent in self.get_bricks()],
+            "catalog": {
+                "shapes": list_shapes(),
+                "placementRules": list_placement_rules(),
+            },
         }
+
+
+def default_builder_configs(brick_unit=10):
+    return [
+        BuilderConfig(
+            id="red",
+            color="Red",
+            shape_id="bar_2x1",
+            start_anchor=(0, 0, 0),
+            placement_rule_id="alternating_sideways_vertical",
+        ),
+        BuilderConfig(
+            id="blue",
+            color="Blue",
+            shape_id="bar_2x1",
+            start_anchor=(brick_unit * 4, 0, 0),
+            placement_rule_id="alternating_sideways_vertical",
+        ),
+    ]
 
 
 def ensure_exports_dir():
@@ -247,14 +245,12 @@ def run_simulation(
     scad_output_path=DEFAULT_SCAD_PATH,
     json_output_path=DEFAULT_JSON_PATH,
     seed=None,
+    builders=None,
     verbose=False,
 ):
     ensure_exports_dir()
-
-    if seed is not None:
-        random.seed(seed)
-
-    model = BrickModel(total_steps, verbose=verbose)
+    rng = random.Random(seed)
+    model = BrickModel(total_steps, builders=builders, rng=rng, verbose=verbose)
     model.run()
 
     simulation = model.to_dict()
