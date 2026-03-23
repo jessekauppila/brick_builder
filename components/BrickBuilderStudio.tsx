@@ -345,34 +345,8 @@ export function BrickBuilderStudio() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#1d4ed8_0%,#0f172a_35%,#020617_100%)] text-zinc-50">
-      <main className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-5 px-4 py-4 sm:px-6 lg:px-8">
-        <StudioPanel className="p-5 lg:p-6">
-          <PanelHeader
-            eyebrow="Brick Builder Studio"
-            title="Rule-driven generator workspace"
-            description="Configure high-level generation settings and per-builder rule sets on the left, then inspect the committed bricks, runtime state, and exports on the right."
-            actions={
-              <div className="flex flex-wrap gap-2">
-                <StatusLight
-                  label={isLoading ? "Generating" : result ? "Ready" : "Idle"}
-                  tone={generationTone}
-                />
-                <StatusLight
-                  label="Builders"
-                  tone="info"
-                  value={builders.length}
-                />
-                <StatusLight
-                  label={downloadUrl || jsonDownloadUrl ? "Exports saved" : "Exports pending"}
-                  tone={exportTone}
-                />
-              </div>
-            }
-          />
-        </StudioPanel>
-
-        <section className="grid items-start gap-5 lg:grid-cols-[360px,minmax(0,1fr)] xl:grid-cols-[380px,minmax(0,1fr)]">
-          <StudioPanel className="p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+      <main className="studio-workspace mx-auto min-h-screen w-full max-w-[1500px] px-4 py-4 sm:px-6 lg:px-8">
+        <StudioPanel className="studio-control-rail p-4">
             <form className="space-y-4" onSubmit={handleSubmit}>
               <PanelHeader
                 title="Control Rail"
@@ -698,81 +672,87 @@ export function BrickBuilderStudio() {
                 </div>
               </CollapsibleSection>
             </form>
+        </StudioPanel>
+
+        <div className="space-y-5">
+          <StudioPanel className="p-4 lg:p-5">
+            <PanelHeader
+              eyebrow="Brick Builder Studio"
+              title="Rule-driven generator workspace"
+              description="Tune builders on the left and keep the Three.js scene in view on the right while runtime details stay tucked into collapsible panels below."
+              actions={
+                <div className="flex flex-wrap gap-2">
+                  <StatusLight
+                    label={isLoading ? "Generating" : result ? "Ready" : "Idle"}
+                    tone={generationTone}
+                  />
+                  <StatusLight label="Builders" tone="info" value={builders.length} />
+                  <StatusLight label="Visible cubes" tone="info" value={filteredBricks.length} />
+                  <StatusLight
+                    label={downloadUrl || jsonDownloadUrl ? "Exports saved" : "Exports pending"}
+                    tone={exportTone}
+                  />
+                </div>
+              }
+            />
+
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
+              <label className="flex flex-wrap items-center gap-3">
+                <span className="font-medium text-white">Viewer filter</span>
+                <select
+                  className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-slate-50 outline-none transition focus:border-sky-400"
+                  value={selectedBuilderFilter}
+                  onChange={(event) => setSelectedBuilderFilter(event.target.value)}
+                >
+                  <option value="all">All builders</option>
+                  {result?.builders.map((builder) => (
+                    <option key={builder.id} value={builder.id}>
+                      {builder.id}
+                    </option>
+                  )) ?? null}
+                </select>
+              </label>
+              <StatusLight
+                label={selectedBuilderFilter === "all" ? "All builders" : selectedBuilderFilter}
+                tone="neutral"
+              />
+              <p className="text-slate-400">
+                Showing {filteredBricks.length} cube{filteredBricks.length === 1 ? "" : "s"}.
+              </p>
+            </div>
+
+            <BrickPreviewCanvas
+              bricks={filteredBricks}
+              className="mt-4 h-[520px] sm:h-[560px] lg:h-[calc(100vh-13rem)] lg:min-h-[680px]"
+            />
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-7 text-slate-300">
+              <p>
+                The live preview renders the committed cube instances from the simulation.
+                Filter by builder to inspect continuity and use the diagnostics below to
+                understand why a builder placed, skipped, backtracked, or stopped.
+              </p>
+            </div>
           </StudioPanel>
 
-          <div className="space-y-5">
-            <StudioPanel className="p-4 lg:p-5">
+          {error ? (
+            <StudioPanel className="border border-red-400/25 bg-[linear-gradient(180deg,rgba(127,29,29,0.78),rgba(69,10,10,0.72))] p-4">
               <PanelHeader
-                title="Preview Workspace"
-                description="The viewer stays dominant while run diagnostics and export details live in collapsible panels below it."
-                actions={
-                  <div className="flex flex-wrap gap-2">
-                    <StatusLight
-                      label="Visible cubes"
-                      tone="info"
-                      value={filteredBricks.length}
-                    />
-                    <StatusLight
-                      label={selectedBuilderFilter === "all" ? "All builders" : selectedBuilderFilter}
-                      tone="neutral"
-                    />
-                  </div>
-                }
+                title="Generation error"
+                description={error}
+                actions={<StatusLight label="Attention" tone="bad" />}
               />
-
-              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
-                <label className="flex flex-wrap items-center gap-3">
-                  <span className="font-medium text-white">Viewer filter</span>
-                  <select
-                    className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-slate-50 outline-none transition focus:border-sky-400"
-                    value={selectedBuilderFilter}
-                    onChange={(event) => setSelectedBuilderFilter(event.target.value)}
-                  >
-                    <option value="all">All builders</option>
-                    {result?.builders.map((builder) => (
-                      <option key={builder.id} value={builder.id}>
-                        {builder.id}
-                      </option>
-                    )) ?? null}
-                  </select>
-                </label>
-                <p className="text-slate-400">
-                  Showing {filteredBricks.length} cube{filteredBricks.length === 1 ? "" : "s"}.
-                </p>
-              </div>
-
-              <BrickPreviewCanvas
-                bricks={filteredBricks}
-                className="mt-4 h-[520px] lg:h-[calc(100vh-18rem)] lg:min-h-[620px]"
-              />
-
-              <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-7 text-slate-300">
-                <p>
-                  The live preview renders the committed cube instances from the simulation.
-                  Filter by builder to inspect continuity and use the diagnostics below to
-                  understand why a builder placed, skipped, backtracked, or stopped.
-                </p>
-              </div>
             </StudioPanel>
+          ) : null}
 
-            {error ? (
-              <StudioPanel className="border border-red-400/25 bg-[linear-gradient(180deg,rgba(127,29,29,0.78),rgba(69,10,10,0.72))] p-4">
-                <PanelHeader
-                  title="Generation error"
-                  description={error}
-                  actions={<StatusLight label="Attention" tone="bad" />}
-                />
-              </StudioPanel>
-            ) : null}
+          <StudioPanel className="p-4 lg:p-5">
+            <PanelHeader
+              eyebrow="Run Diagnostics"
+              title="Output and runtime details"
+              description="These panels follow the current run so the preview stays visible while deeper diagnostics remain available on demand."
+            />
 
-            <StudioPanel className="p-4 lg:p-5">
-              <PanelHeader
-                eyebrow="Run Diagnostics"
-                title="Output and runtime details"
-                description="These panels follow the current run so the preview stays visible while deeper diagnostics remain available on demand."
-              />
-
-              <div className="mt-4 space-y-4">
+            <div className="mt-4 space-y-4">
                 <CollapsibleSection
                   title="Run Summary"
                   description="API target, result metrics, and export actions."
@@ -896,10 +876,9 @@ export function BrickBuilderStudio() {
                     </p>
                   )}
                 </CollapsibleSection>
-              </div>
-            </StudioPanel>
-          </div>
-        </section>
+            </div>
+          </StudioPanel>
+        </div>
       </main>
     </div>
   );

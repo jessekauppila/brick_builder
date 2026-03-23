@@ -112,3 +112,42 @@ body {
   box-shadow: rgb(2 6 23) 0 -1px 6px 1px, inset rgb(3 105 161) 0 -1px 8px,
     rgb(56 189 248) 0 0 12px;
 }
+
+
+.studio-workspace {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.studio-control-rail {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
+@media (min-width: 1024px) {
+  .studio-workspace {
+    grid-template-columns: 340px minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .studio-workspace {
+    grid-template-columns: 380px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .studio-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .studio-control-rail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
