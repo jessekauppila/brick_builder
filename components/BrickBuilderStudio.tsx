@@ -3,6 +3,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { BrickPreviewCanvas, type BrickRecord } from "@/components/BrickPreviewCanvas";
+import {
+  CollapsibleSection,
+  JsonBlock,
+  Metric,
+  PanelHeader,
+  StatusLight,
+  StudioPanel,
+} from "@/components/hmi/StudioPrimitives";
 
 type BuilderInput = {
   id: string;
@@ -171,6 +179,10 @@ function createBuilder(index: number): BuilderInput {
   };
 }
 
+function getOptionLabel(options: CatalogOption[], value: string) {
+  return options.find((option) => option.id === value)?.label ?? value;
+}
+
 export function BrickBuilderStudio() {
   const [totalSteps, setTotalSteps] = useState("200");
   const [cubeCage, setCubeCage] = useState("200");
@@ -256,6 +268,14 @@ export function BrickBuilderStudio() {
     () => result?.trace.slice(-20).reverse() ?? [],
     [result],
   );
+  const generationTone = error
+    ? "bad"
+    : isLoading
+      ? "warn"
+      : result
+        ? "good"
+        : "neutral";
+  const exportTone = downloadUrl || jsonDownloadUrl ? "good" : result ? "warn" : "neutral";
 
   function updateBuilder(index: number, patch: Partial<BuilderInput>) {
     setBuilders((currentBuilders) =>
@@ -325,472 +345,559 @@ export function BrickBuilderStudio() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#1d4ed8_0%,#0f172a_35%,#020617_100%)] text-zinc-50">
-      <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-8 px-6 py-10 lg:px-10">
-        <section className="space-y-4">
-          <p className="text-sm uppercase tracking-[0.3em] text-sky-300">
-            Local Python + Three.js
-          </p>
-          <div className="space-y-3">
-            <h1 className="max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">
-              Generate brick models in Python and preview them instantly in the browser.
-            </h1>
-            <p className="max-w-3xl text-base leading-7 text-zinc-300 sm:text-lg">
-              The Python service now treats each colored builder as its own rule set, so
-              one simulation tick can place a red shape, a blue shape, and any future
-              builders you add to the shared world.
-            </p>
-          </div>
-        </section>
-
-        <section className="grid items-start gap-6 lg:grid-cols-[420px,minmax(0,1fr)] xl:grid-cols-[440px,minmax(0,1fr)]">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-black/20 backdrop-blur lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-zinc-200" htmlFor="totalSteps">
-                  Total steps
-                </label>
-                <input
-                  id="totalSteps"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                  min="1"
-                  max="2000"
-                  type="number"
-                  value={totalSteps}
-                  onChange={(event) => setTotalSteps(event.target.value)}
+      <main className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-5 px-4 py-4 sm:px-6 lg:px-8">
+        <StudioPanel className="p-5 lg:p-6">
+          <PanelHeader
+            eyebrow="Brick Builder Studio"
+            title="Rule-driven generator workspace"
+            description="Configure high-level generation settings and per-builder rule sets on the left, then inspect the committed bricks, runtime state, and exports on the right."
+            actions={
+              <div className="flex flex-wrap gap-2">
+                <StatusLight
+                  label={isLoading ? "Generating" : result ? "Ready" : "Idle"}
+                  tone={generationTone}
+                />
+                <StatusLight
+                  label="Builders"
+                  tone="info"
+                  value={builders.length}
+                />
+                <StatusLight
+                  label={downloadUrl || jsonDownloadUrl ? "Exports saved" : "Exports pending"}
+                  tone={exportTone}
                 />
               </div>
+            }
+          />
+        </StudioPanel>
 
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-zinc-200" htmlFor="seed">
-                  Seed
-                </label>
-                <input
-                  id="seed"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                  placeholder="Optional"
-                  type="number"
-                  value={seed}
-                  onChange={(event) => setSeed(event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-zinc-200" htmlFor="cubeCage">
-                  Cage size
-                </label>
-                <input
-                  id="cubeCage"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                  min="10"
-                  max="5000"
-                  type="number"
-                  value={cubeCage}
-                  onChange={(event) => setCubeCage(event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-zinc-200" htmlFor="fileName">
-                  Export file name
-                </label>
-                <input
-                  id="fileName"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                  type="text"
-                  value={fileName}
-                  onChange={(event) => setFileName(event.target.value)}
-                />
-              </div>
-
-              <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-200">
-                <input
-                  checked={saveScad}
-                  className="h-4 w-4 accent-sky-400"
-                  type="checkbox"
-                  onChange={(event) => setSaveScad(event.target.checked)}
-                />
-                Save an OpenSCAD export in `backend/exports/`
-              </label>
-
-              <div className="space-y-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-zinc-100">Builder rule sets</p>
-                    <p className="mt-1 text-xs leading-6 text-zinc-400">
-                      Each step runs every builder in order against the same occupied grid.
-                    </p>
-                  </div>
+        <section className="grid items-start gap-5 lg:grid-cols-[360px,minmax(0,1fr)] xl:grid-cols-[380px,minmax(0,1fr)]">
+          <StudioPanel className="p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <PanelHeader
+                title="Control Rail"
+                description="Builder settings stay on the left so the preview workspace remains visible while you tune the run."
+                actions={
                   <button
-                    className="rounded-full border border-sky-300/30 px-3 py-2 text-xs font-medium text-sky-200 transition hover:border-sky-200 hover:text-white"
-                    type="button"
-                    onClick={() =>
-                      setBuilders((currentBuilders) => [
-                        ...currentBuilders,
-                        createBuilder(currentBuilders.length),
-                      ])
-                    }
+                    className="rounded-full bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:bg-sky-400/50"
+                    disabled={isLoading}
+                    type="submit"
                   >
-                    Add builder
+                    {isLoading ? "Generating..." : "Generate model"}
                   </button>
-                </div>
+                }
+              />
 
-                <div className="space-y-4">
-                  {builders.map((builder, index) => (
-                    <div
-                      key={`${builder.id}-${index}`}
-                      className="space-y-4 rounded-2xl border border-white/10 bg-black/30 p-4"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium text-zinc-100">
-                          Builder {index + 1}
-                        </p>
-                        {builders.length > 1 ? (
-                          <button
-                            className="text-xs font-medium text-red-200 transition hover:text-white"
-                            type="button"
-                            onClick={() =>
-                              setBuilders((currentBuilders) =>
-                                currentBuilders.filter(
-                                  (_, builderIndex) => builderIndex !== index,
-                                ),
-                              )
-                            }
-                          >
-                            Remove
-                          </button>
-                        ) : null}
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Id</span>
-                          <input
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            type="text"
-                            value={builder.id}
-                            onChange={(event) =>
-                              updateBuilder(index, { id: event.target.value })
-                            }
-                          />
-                        </label>
-
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Color</span>
-                          <input
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            type="text"
-                            value={builder.color}
-                            onChange={(event) =>
-                              updateBuilder(index, { color: event.target.value })
-                            }
-                          />
-                        </label>
-
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Shape</span>
-                          <select
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            value={builder.shapeId}
-                            onChange={(event) =>
-                              updateBuilder(index, { shapeId: event.target.value })
-                            }
-                          >
-                            {catalog.shapes.map((shape) => (
-                              <option key={shape.id} value={shape.id}>
-                                {shape.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Placement rule</span>
-                          <select
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            value={builder.placementRuleId}
-                            onChange={(event) =>
-                              updateBuilder(index, {
-                                placementRuleId: event.target.value,
-                              })
-                            }
-                          >
-                            {catalog.placementRules.map((rule) => (
-                              <option key={rule.id} value={rule.id}>
-                                {rule.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Placements</span>
-                          <input
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            min="0"
-                            max="2000"
-                            type="number"
-                            value={builder.maxPlacements}
-                            onChange={(event) =>
-                              updateBuilder(index, {
-                                maxPlacements: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Failure policy</span>
-                          <select
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            value={builder.failurePolicy}
-                            onChange={(event) =>
-                              updateBuilder(index, {
-                                failurePolicy: event.target.value,
-                              })
-                            }
-                          >
-                            {catalog.failurePolicies.map((policy) => (
-                              <option key={policy.id} value={policy.id}>
-                                {policy.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Continuity</span>
-                          <select
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            value={builder.continuityMode}
-                            onChange={(event) =>
-                              updateBuilder(index, {
-                                continuityMode: event.target.value,
-                              })
-                            }
-                          >
-                            {catalog.continuityModes.map((mode) => (
-                              <option key={mode.id} value={mode.id}>
-                                {mode.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="space-y-2 text-sm text-zinc-200">
-                          <span className="block font-medium">Backtrack depth</span>
-                          <input
-                            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                            min="1"
-                            max="5000"
-                            type="number"
-                            value={builder.maxBacktrackDepth}
-                            onChange={(event) =>
-                              updateBuilder(index, {
-                                maxBacktrackDepth: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        {(["X", "Y", "Z"] as const).map((axis, axisIndex) => (
-                          <label key={axis} className="space-y-2 text-sm text-zinc-200">
-                            <span className="block font-medium">Start {axis}</span>
-                            <input
-                              className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-zinc-50 outline-none transition focus:border-sky-400"
-                              type="number"
-                              value={builder.startAnchor[axisIndex]}
-                              onChange={(event) =>
-                                updateBuilder(index, {
-                                  startAnchor: builder.startAnchor.map(
-                                    (value, anchorIndex) =>
-                                      anchorIndex === axisIndex
-                                        ? event.target.value
-                                        : value,
-                                  ) as [string, string, string],
-                                })
-                              }
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                className="w-full rounded-2xl bg-sky-400 px-4 py-3 font-medium text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:bg-sky-400/50"
-                disabled={isLoading}
-                type="submit"
+              <CollapsibleSection
+                title="Generation Settings"
+                description="High-level run controls for the shared simulation."
+                defaultOpen
+                summary={
+                  <>
+                    <span>{totalSteps} steps</span>
+                    <span>{cubeCage} cage</span>
+                  </>
+                }
               >
-                {isLoading ? "Generating..." : "Generate model"}
-              </button>
-            </form>
+                <div className="grid gap-3">
+                  <label className="space-y-2 text-sm text-slate-200" htmlFor="totalSteps">
+                    <span className="block font-medium">Total steps</span>
+                    <input
+                      id="totalSteps"
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                      min="1"
+                      max="2000"
+                      type="number"
+                      value={totalSteps}
+                      onChange={(event) => setTotalSteps(event.target.value)}
+                    />
+                  </label>
 
-            <div className="mt-6 space-y-4 border-t border-white/10 pt-6 text-sm text-zinc-300">
-              <div>
-                <p className="font-medium text-zinc-100">API target</p>
-                <p className="mt-1 break-all text-zinc-400">{DEFAULT_API_URL}</p>
-              </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-2 text-sm text-slate-200" htmlFor="seed">
+                      <span className="block font-medium">Seed</span>
+                      <input
+                        id="seed"
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                        placeholder="Optional"
+                        type="number"
+                        value={seed}
+                        onChange={(event) => setSeed(event.target.value)}
+                      />
+                    </label>
 
-              {error ? (
-                <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-red-100">
-                  {error}
-                </div>
-              ) : null}
-
-              {result ? (
-                <div className="space-y-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-zinc-400">Bricks</p>
-                      <p className="text-lg font-semibold text-zinc-50">
-                        {result.metadata.brickCount}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-zinc-400">Placements</p>
-                      <p className="text-lg font-semibold text-zinc-50">
-                        {result.metadata.placementCount}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-zinc-400">Builders</p>
-                      <p className="text-lg font-semibold text-zinc-50">
-                        {result.metadata.builderCount}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-zinc-400">Brick unit</p>
-                      <p className="text-lg font-semibold text-zinc-50">
-                        {result.metadata.brickUnit}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-zinc-400">Seed</p>
-                      <p className="text-lg font-semibold text-zinc-50">
-                        {result.metadata.seed ?? "random"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-zinc-400">Cage</p>
-                      <p className="text-lg font-semibold text-zinc-50">
-                        {result.metadata.cubeCage}
-                      </p>
-                    </div>
+                    <label className="space-y-2 text-sm text-slate-200" htmlFor="cubeCage">
+                      <span className="block font-medium">Cage size</span>
+                      <input
+                        id="cubeCage"
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                        min="10"
+                        max="5000"
+                        type="number"
+                        value={cubeCage}
+                        onChange={(event) => setCubeCage(event.target.value)}
+                      />
+                    </label>
                   </div>
 
-                  {downloadUrl || jsonDownloadUrl ? (
-                    <div className="flex flex-wrap gap-3">
-                      {downloadUrl ? (
-                        <a
-                          className="inline-flex rounded-full border border-sky-300/30 px-4 py-2 font-medium text-sky-200 transition hover:border-sky-200 hover:text-white"
-                          href={downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Download SCAD export
-                        </a>
-                      ) : null}
-                      {jsonDownloadUrl ? (
-                        <a
-                          className="inline-flex rounded-full border border-emerald-300/30 px-4 py-2 font-medium text-emerald-200 transition hover:border-emerald-200 hover:text-white"
-                          href={jsonDownloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Download JSON export
-                        </a>
-                      ) : null}
+                  <label className="space-y-2 text-sm text-slate-200" htmlFor="fileName">
+                    <span className="block font-medium">Export file name</span>
+                    <input
+                      id="fileName"
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                      type="text"
+                      value={fileName}
+                      onChange={(event) => setFileName(event.target.value)}
+                    />
+                  </label>
+
+                  <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200">
+                    <input
+                      checked={saveScad}
+                      className="h-4 w-4 accent-sky-400"
+                      type="checkbox"
+                      onChange={(event) => setSaveScad(event.target.checked)}
+                    />
+                    Save an OpenSCAD export in `backend/exports/`
+                  </label>
+                </div>
+              </CollapsibleSection>
+
+              <CollapsibleSection
+                title="Builder Rule Sets"
+                description="Each builder runs against the same occupied grid, so collapsing each card keeps the rail readable."
+                defaultOpen
+                summary={<span>{builders.length} configured</span>}
+              >
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-white">Rule set collection</p>
+                      <p className="text-xs leading-5 text-slate-400">
+                        Add or trim builders without losing sight of the preview workspace.
+                      </p>
+                    </div>
+                    <button
+                      className="rounded-full border border-sky-300/30 px-3 py-2 text-xs font-medium text-sky-200 transition hover:border-sky-200 hover:text-white"
+                      type="button"
+                      onClick={() =>
+                        setBuilders((currentBuilders) => [
+                          ...currentBuilders,
+                          createBuilder(currentBuilders.length),
+                        ])
+                      }
+                    >
+                      Add builder
+                    </button>
+                  </div>
+
+                  {builders.map((builder, index) => {
+                    const shapeLabel = getOptionLabel(catalog.shapes, builder.shapeId);
+                    const ruleLabel = getOptionLabel(
+                      catalog.placementRules,
+                      builder.placementRuleId,
+                    );
+
+                    return (
+                      <CollapsibleSection
+                        key={`${builder.id}-${index}`}
+                        title={`Builder ${index + 1}`}
+                        description="Collapse finished rule cards to keep the left rail compact."
+                        defaultOpen={index === 0}
+                        summary={
+                          <>
+                            <span className="rounded-full border border-white/10 bg-black/25 px-2 py-1 text-[0.68rem] uppercase tracking-[0.18em] text-slate-300">
+                              {builder.color || "Color"}
+                            </span>
+                            <span>{shapeLabel}</span>
+                            <span>{builder.maxPlacements} placements</span>
+                          </>
+                        }
+                      >
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs leading-5 text-slate-400">
+                              <p>{ruleLabel}</p>
+                              <p>Start anchor: {builder.startAnchor.join(", ")}</p>
+                            </div>
+                            {builders.length > 1 ? (
+                              <button
+                                className="rounded-full border border-red-300/20 px-3 py-1.5 text-xs font-medium text-red-200 transition hover:border-red-200/40 hover:text-white"
+                                type="button"
+                                onClick={() =>
+                                  setBuilders((currentBuilders) =>
+                                    currentBuilders.filter(
+                                      (_, builderIndex) => builderIndex !== index,
+                                    ),
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            ) : null}
+                          </div>
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Id</span>
+                              <input
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                type="text"
+                                value={builder.id}
+                                onChange={(event) =>
+                                  updateBuilder(index, { id: event.target.value })
+                                }
+                              />
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Color</span>
+                              <input
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                type="text"
+                                value={builder.color}
+                                onChange={(event) =>
+                                  updateBuilder(index, { color: event.target.value })
+                                }
+                              />
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Shape</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.shapeId}
+                                onChange={(event) =>
+                                  updateBuilder(index, { shapeId: event.target.value })
+                                }
+                              >
+                                {catalog.shapes.map((shape) => (
+                                  <option key={shape.id} value={shape.id}>
+                                    {shape.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Placement rule</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.placementRuleId}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    placementRuleId: event.target.value,
+                                  })
+                                }
+                              >
+                                {catalog.placementRules.map((rule) => (
+                                  <option key={rule.id} value={rule.id}>
+                                    {rule.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Placements</span>
+                              <input
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                min="0"
+                                max="2000"
+                                type="number"
+                                value={builder.maxPlacements}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    maxPlacements: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Failure policy</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.failurePolicy}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    failurePolicy: event.target.value,
+                                  })
+                                }
+                              >
+                                {catalog.failurePolicies.map((policy) => (
+                                  <option key={policy.id} value={policy.id}>
+                                    {policy.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Continuity</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.continuityMode}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    continuityMode: event.target.value,
+                                  })
+                                }
+                              >
+                                {catalog.continuityModes.map((mode) => (
+                                  <option key={mode.id} value={mode.id}>
+                                    {mode.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200 sm:col-span-2">
+                              <span className="block font-medium">Backtrack depth</span>
+                              <input
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                min="1"
+                                max="5000"
+                                type="number"
+                                value={builder.maxBacktrackDepth}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    maxBacktrackDepth: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            {(["X", "Y", "Z"] as const).map((axis, axisIndex) => (
+                              <label key={axis} className="space-y-2 text-sm text-slate-200">
+                                <span className="block font-medium">Start {axis}</span>
+                                <input
+                                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                  type="number"
+                                  value={builder.startAnchor[axisIndex]}
+                                  onChange={(event) =>
+                                    updateBuilder(index, {
+                                      startAnchor: builder.startAnchor.map(
+                                        (value, anchorIndex) =>
+                                          anchorIndex === axisIndex
+                                            ? event.target.value
+                                            : value,
+                                      ) as [string, string, string],
+                                    })
+                                  }
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </CollapsibleSection>
+                    );
+                  })}
+                </div>
+              </CollapsibleSection>
+            </form>
+          </StudioPanel>
+
+          <div className="space-y-5">
+            <StudioPanel className="p-4 lg:p-5">
+              <PanelHeader
+                title="Preview Workspace"
+                description="The viewer stays dominant while run diagnostics and export details live in collapsible panels below it."
+                actions={
+                  <div className="flex flex-wrap gap-2">
+                    <StatusLight
+                      label="Visible cubes"
+                      tone="info"
+                      value={filteredBricks.length}
+                    />
+                    <StatusLight
+                      label={selectedBuilderFilter === "all" ? "All builders" : selectedBuilderFilter}
+                      tone="neutral"
+                    />
+                  </div>
+                }
+              />
+
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
+                <label className="flex flex-wrap items-center gap-3">
+                  <span className="font-medium text-white">Viewer filter</span>
+                  <select
+                    className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-slate-50 outline-none transition focus:border-sky-400"
+                    value={selectedBuilderFilter}
+                    onChange={(event) => setSelectedBuilderFilter(event.target.value)}
+                  >
+                    <option value="all">All builders</option>
+                    {result?.builders.map((builder) => (
+                      <option key={builder.id} value={builder.id}>
+                        {builder.id}
+                      </option>
+                    )) ?? null}
+                  </select>
+                </label>
+                <p className="text-slate-400">
+                  Showing {filteredBricks.length} cube{filteredBricks.length === 1 ? "" : "s"}.
+                </p>
+              </div>
+
+              <BrickPreviewCanvas
+                bricks={filteredBricks}
+                className="mt-4 h-[520px] lg:h-[calc(100vh-18rem)] lg:min-h-[620px]"
+              />
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-7 text-slate-300">
+                <p>
+                  The live preview renders the committed cube instances from the simulation.
+                  Filter by builder to inspect continuity and use the diagnostics below to
+                  understand why a builder placed, skipped, backtracked, or stopped.
+                </p>
+              </div>
+            </StudioPanel>
+
+            {error ? (
+              <StudioPanel className="border border-red-400/25 bg-[linear-gradient(180deg,rgba(127,29,29,0.78),rgba(69,10,10,0.72))] p-4">
+                <PanelHeader
+                  title="Generation error"
+                  description={error}
+                  actions={<StatusLight label="Attention" tone="bad" />}
+                />
+              </StudioPanel>
+            ) : null}
+
+            <StudioPanel className="p-4 lg:p-5">
+              <PanelHeader
+                eyebrow="Run Diagnostics"
+                title="Output and runtime details"
+                description="These panels follow the current run so the preview stays visible while deeper diagnostics remain available on demand."
+              />
+
+              <div className="mt-4 space-y-4">
+                <CollapsibleSection
+                  title="Run Summary"
+                  description="API target, result metrics, and export actions."
+                  defaultOpen
+                  summary={
+                    result ? (
+                      <>
+                        <span>{result.metadata.brickCount} bricks</span>
+                        <span>{result.metadata.placementCount} placements</span>
+                      </>
+                    ) : (
+                      <span>Awaiting first run</span>
+                    )
+                  }
+                >
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3">
+                      <p className="text-[0.7rem] uppercase tracking-[0.22em] text-slate-400">
+                        API target
+                      </p>
+                      <p className="mt-2 break-all text-sm text-slate-200">{DEFAULT_API_URL}</p>
+                    </div>
+
+                    {result ? (
+                      <>
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          <Metric label="Bricks" value={result.metadata.brickCount} />
+                          <Metric label="Placements" value={result.metadata.placementCount} />
+                          <Metric label="Builders" value={result.metadata.builderCount} />
+                          <Metric label="Brick unit" value={result.metadata.brickUnit} />
+                          <Metric label="Seed" value={result.metadata.seed ?? "random"} />
+                          <Metric label="Cage" value={result.metadata.cubeCage} />
+                        </div>
+
+                        {downloadUrl || jsonDownloadUrl ? (
+                          <div className="flex flex-wrap gap-3">
+                            {downloadUrl ? (
+                              <a
+                                className="inline-flex rounded-full border border-sky-300/30 px-4 py-2 font-medium text-sky-200 transition hover:border-sky-200 hover:text-white"
+                                href={downloadUrl}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                Download SCAD export
+                              </a>
+                            ) : null}
+                            {jsonDownloadUrl ? (
+                              <a
+                                className="inline-flex rounded-full border border-emerald-300/30 px-4 py-2 font-medium text-emerald-200 transition hover:border-emerald-200 hover:text-white"
+                                href={jsonDownloadUrl}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                Download JSON export
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-400">
+                            This run rendered in Three.js only and did not save export files.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-400">
+                        Run the generator to populate metrics, exports, and diagnostics.
+                      </p>
+                    )}
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="Builder Configs Used"
+                  description="Serialized builder inputs sent with the latest generation request."
+                  summary={result ? <span>{result.builders.length} builders</span> : <span>No run yet</span>}
+                >
+                  <JsonBlock
+                    emptyLabel="Run the generator to inspect the builder configs used for the latest result."
+                    value={result?.builders}
+                  />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="Builder Runtime State"
+                  description="Per-builder runtime details returned by the simulation."
+                  summary={result ? <span>{result.builderStates.length} runtime records</span> : <span>No run yet</span>}
+                >
+                  <JsonBlock
+                    emptyLabel="Runtime state will appear here after the first successful run."
+                    value={result?.builderStates}
+                  />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="Recent Trace Events"
+                  description="Last 20 trace events, newest first."
+                  summary={recentTrace.length > 0 ? <span>{recentTrace.length} events</span> : <span>No events yet</span>}
+                >
+                  <JsonBlock
+                    emptyLabel="Trace events will appear here after the simulation runs."
+                    value={recentTrace}
+                  />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="Export Paths And Raw Response"
+                  description="Low-level payload and file destinations for the latest run."
+                  summary={result ? <span>Payload ready</span> : <span>No payload yet</span>}
+                >
+                  {result ? (
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-xs leading-6 text-slate-300">
+                        <p>SCAD path: {result.metadata.outputPath ?? "not saved"}</p>
+                        <p>JSON path: {result.metadata.jsonOutputPath ?? "not saved"}</p>
+                      </div>
+                      <JsonBlock emptyLabel="" value={result} />
                     </div>
                   ) : (
-                    <p className="text-zinc-300">
-                      This run rendered in Three.js only and did not save export files.
+                    <p className="text-sm text-slate-400">
+                      The raw API payload will appear here after a successful run.
                     </p>
                   )}
-
-                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                    <summary className="cursor-pointer font-medium text-zinc-100">
-                      Builder configs used
-                    </summary>
-                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
-                      {JSON.stringify(result.builders, null, 2)}
-                    </pre>
-                  </details>
-
-                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                    <summary className="cursor-pointer font-medium text-zinc-100">
-                      Builder runtime state
-                    </summary>
-                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
-                      {JSON.stringify(result.builderStates, null, 2)}
-                    </pre>
-                  </details>
-
-                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                    <summary className="cursor-pointer font-medium text-zinc-100">
-                      Recent trace events
-                    </summary>
-                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
-                      {JSON.stringify(recentTrace, null, 2)}
-                    </pre>
-                  </details>
-
-                  <details className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                    <summary className="cursor-pointer font-medium text-zinc-100">
-                      Export paths and raw response
-                    </summary>
-                    <div className="mt-3 space-y-2 text-xs leading-6 text-zinc-300">
-                      <p>SCAD path: {result.metadata.outputPath ?? "not saved"}</p>
-                      <p>JSON path: {result.metadata.jsonOutputPath ?? "not saved"}</p>
-                    </div>
-                    <pre className="mt-3 overflow-x-auto text-xs leading-6 text-zinc-300">
-                      {JSON.stringify(result, null, 2)}
-                    </pre>
-                  </details>
-                </div>
-              ) : (
-                <p className="text-zinc-400">
-                  Run the generator to populate the preview and export details.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-white/10 bg-white/5 p-4 text-sm text-zinc-300 backdrop-blur">
-              <label className="flex items-center gap-3">
-                <span className="font-medium text-zinc-100">Viewer filter</span>
-                <select
-                  className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-zinc-50 outline-none transition focus:border-sky-400"
-                  value={selectedBuilderFilter}
-                  onChange={(event) => setSelectedBuilderFilter(event.target.value)}
-                >
-                  <option value="all">All builders</option>
-                  {result?.builders.map((builder) => (
-                    <option key={builder.id} value={builder.id}>
-                      {builder.id}
-                    </option>
-                  )) ?? null}
-                </select>
-              </label>
-              <p className="text-zinc-400">
-                Showing {filteredBricks.length} cube{filteredBricks.length === 1 ? "" : "s"}.
-              </p>
-            </div>
-            <BrickPreviewCanvas
-              bricks={filteredBricks}
-              className="lg:h-[calc(100vh-16rem)] lg:min-h-[620px]"
-            />
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5 text-sm leading-7 text-zinc-300 backdrop-blur">
-              <p>
-                The live preview renders the committed cube instances from the simulation.
-                Filter by builder to inspect continuity and use the runtime state and trace
-                panels to understand why a builder placed, skipped, backtracked, or stopped.
-              </p>
-            </div>
+                </CollapsibleSection>
+              </div>
+            </StudioPanel>
           </div>
         </section>
       </main>

@@ -22,5 +22,93 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+.loupe-panel {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background:
+    linear-gradient(180deg, rgb(15 23 42 / 0.9), rgb(2 6 23 / 0.88)),
+    radial-gradient(circle at top, rgb(56 189 248 / 0.08), transparent 52%);
+  box-shadow: 0 28px 70px rgb(2 6 23 / 0.38);
+  border-radius: 1.5rem;
+  backdrop-filter: blur(24px);
+}
+
+.loupe-section {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(2 6 23 / 0.42);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.loupe-section-summary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.95rem 1rem;
+  text-align: left;
+}
+
+.loupe-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.loupe-summary-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.9rem;
+  color: rgb(125 211 252);
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+[data-open="true"] .loupe-summary-indicator {
+  transform: rotate(90deg);
+}
+
+/* Adapted from Loupe-UX/src/HMI/lux.css (.led). */
+.loupe-led {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 9999px;
+  background-color: rgb(148 163 184 / 0.5);
+  box-shadow: rgb(2 6 23) 0 -1px 6px 1px;
+}
+
+/* Adapted from Loupe-UX/src/HMI/lux.css color-specific LED variants. */
+.loupe-led--neutral {
+  background-color: rgb(148 163 184);
+  box-shadow: rgb(2 6 23) 0 -1px 6px 1px, inset rgb(51 65 85) 0 -1px 8px,
+    rgb(148 163 184) 0 0 10px;
+}
+
+.loupe-led--good {
+  background-color: rgb(132 255 0);
+  box-shadow: rgb(2 6 23) 0 -1px 6px 1px, inset rgb(22 101 52) 0 -1px 8px,
+    rgb(132 255 0) 0 0 12px;
+}
+
+.loupe-led--warn {
+  background-color: rgb(251 191 36);
+  box-shadow: rgb(2 6 23) 0 -1px 6px 1px, inset rgb(161 98 7) 0 -1px 8px,
+    rgb(251 191 36) 0 0 12px;
+}
+
+.loupe-led--bad {
+  background-color: rgb(248 113 113);
+  box-shadow: rgb(2 6 23) 0 -1px 6px 1px, inset rgb(153 27 27) 0 -1px 8px,
+    rgb(248 113 113) 0 0 12px;
+}
+
+.loupe-led--info {
+  background-color: rgb(56 189 248);
+  box-shadow: rgb(2 6 23) 0 -1px 6px 1px, inset rgb(3 105 161) 0 -1px 8px,
+    rgb(56 189 248) 0 0 12px;
 }
