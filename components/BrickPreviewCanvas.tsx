@@ -16,41 +16,47 @@ export type BrickRecord = {
   tick?: number | null;
 };
 
-function InstancedBricks({ bricks }: { bricks: BrickRecord[] }) {
+type SceneBounds = {
+  center: [number, number, number];
+  radius: number;
+};
+
+function getSceneBounds(bricks: BrickRecord[]): SceneBounds {
+  if (bricks.length === 0) {
+    return { center: [0, 0, 0], radius: 40 };
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+
+  for (const brick of bricks) {
+    const [x, y, z] = brick.position;
+    const [width, height, depth] = brick.size;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    minZ = Math.min(minZ, z);
+    maxX = Math.max(maxX, x + width);
+    maxY = Math.max(maxY, y + height);
+    maxZ = Math.max(maxZ, z + depth);
+  }
+
+  return {
+    center: [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2],
+    radius: Math.max(maxX - minX, maxY - minY, maxZ - minZ, 40),
+  };
+}
+
+function InstancedBricks({
+  bricks,
+}: {
+  bricks: BrickRecord[];
+}) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-
-  const stats = useMemo(() => {
-    if (bricks.length === 0) {
-      return { center: [0, 0, 0] as [number, number, number], radius: 40 };
-    }
-
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let minZ = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    let maxZ = Number.NEGATIVE_INFINITY;
-
-    for (const brick of bricks) {
-      const [x, y, z] = brick.position;
-      const [width, height, depth] = brick.size;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      minZ = Math.min(minZ, z);
-      maxX = Math.max(maxX, x + width);
-      maxY = Math.max(maxY, y + height);
-      maxZ = Math.max(maxZ, z + depth);
-    }
-
-    const center: [number, number, number] = [
-      (minX + maxX) / 2,
-      (minY + maxY) / 2,
-      (minZ + maxZ) / 2,
-    ];
-    const radius = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 40);
-
-    return { center, radius };
-  }, [bricks]);
+  const bounds = useMemo(() => getSceneBounds(bricks), [bricks]);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;
@@ -77,21 +83,23 @@ function InstancedBricks({ bricks }: { bricks: BrickRecord[] }) {
     if (mesh.instanceColor) {
       mesh.instanceColor.needsUpdate = true;
     }
+    mesh.computeBoundingBox();
+    mesh.computeBoundingSphere();
   }, [bricks]);
 
   return (
     <>
-      <gridHelper args={[stats.radius * 2, 20, "#52525b", "#27272a"]} />
-      <axesHelper args={[stats.radius * 0.75]} />
+      <gridHelper args={[bounds.radius * 2, 20, "#52525b", "#27272a"]} />
+      <axesHelper args={[bounds.radius * 0.75]} />
       <instancedMesh ref={meshRef} args={[undefined, undefined, bricks.length]}>
         <boxGeometry args={[1, 1, 1]} />
         <meshStandardMaterial roughness={0.4} metalness={0.05} />
       </instancedMesh>
       <OrbitControls
         makeDefault
-        target={stats.center}
+        target={bounds.center}
         minDistance={20}
-        maxDistance={stats.radius * 8}
+        maxDistance={bounds.radius * 8}
       />
     </>
   );
@@ -114,21 +122,22 @@ export function BrickPreviewCanvas({
     );
   }
 
-  const maxDimension = bricks.reduce((largest, brick) => {
-    const [x, y, z] = brick.position;
-    const [width, height, depth] = brick.size;
-    return Math.max(largest, Math.abs(x), Math.abs(y), Math.abs(z), width, height, depth);
-  }, 40);
+  const bounds = getSceneBounds(bricks);
+  const [centerX, centerY, centerZ] = bounds.center;
+  const cameraNear = Math.max(bounds.radius / 500, 0.1);
+  const cameraFar = bounds.radius * 24;
+  const cameraPosition: [number, number, number] = [
+    centerX + bounds.radius * 2.5,
+    centerY + bounds.radius * 1.8,
+    centerZ + bounds.radius * 2.5,
+  ];
 
   return (
     <div
       className={`h-[480px] overflow-hidden rounded-3xl border border-white/10 bg-[#050816] shadow-2xl shadow-black/30 ${className}`}
     >
-      <Canvas
-        camera={{ position: [maxDimension * 3, maxDimension * 2, maxDimension * 3], fov: 45 }}
-      >
+      <Canvas camera={{ position: cameraPosition, fov: 45, near: cameraNear, far: cameraFar }}>
         <color attach="background" args={["#050816"]} />
-        <fog attach="fog" args={["#050816", maxDimension * 2, maxDimension * 10]} />
         <ambientLight intensity={1.2} />
         <directionalLight position={[30, 45, 25]} intensity={1.8} />
         <directionalLight position={[-20, -10, -25]} intensity={0.5} color="#7dd3fc" />
