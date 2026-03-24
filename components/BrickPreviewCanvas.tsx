@@ -14,6 +14,9 @@ export type BrickRecord = {
   shapeId?: string | null;
   placementId?: string | null;
   tick?: number | null;
+  supported?: boolean | null;
+  strategy?: string | null;
+  score?: number | null;
 };
 
 type SceneBounds = {
@@ -52,8 +55,12 @@ function getSceneBounds(bricks: BrickRecord[]): SceneBounds {
 
 function InstancedBricks({
   bricks,
+  displayMode,
+  highlightedPlacementIds,
 }: {
   bricks: BrickRecord[];
+  displayMode: "builder" | "support";
+  highlightedPlacementIds: Set<string>;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const bounds = useMemo(() => getSceneBounds(bricks), [bricks]);
@@ -76,7 +83,17 @@ function InstancedBricks({
       tempObject.updateMatrix();
 
       mesh.setMatrixAt(index, tempObject.matrix);
-      mesh.setColorAt(index, tempColor.set(brick.color));
+      const baseColor =
+        displayMode === "support"
+          ? brick.supported
+            ? "#22c55e"
+            : "#ef4444"
+          : brick.color;
+      tempColor.set(baseColor);
+      if (brick.placementId && highlightedPlacementIds.has(brick.placementId)) {
+        tempColor.lerp(new THREE.Color("#f8fafc"), 0.38);
+      }
+      mesh.setColorAt(index, tempColor);
     });
 
     mesh.instanceMatrix.needsUpdate = true;
@@ -108,9 +125,13 @@ function InstancedBricks({
 export function BrickPreviewCanvas({
   bricks,
   className = "",
+  displayMode = "builder",
+  highlightedPlacementIds = [],
 }: {
   bricks: BrickRecord[];
   className?: string;
+  displayMode?: "builder" | "support";
+  highlightedPlacementIds?: string[];
 }) {
   if (bricks.length === 0) {
     return (
@@ -141,7 +162,11 @@ export function BrickPreviewCanvas({
         <ambientLight intensity={1.2} />
         <directionalLight position={[30, 45, 25]} intensity={1.8} />
         <directionalLight position={[-20, -10, -25]} intensity={0.5} color="#7dd3fc" />
-        <InstancedBricks bricks={bricks} />
+        <InstancedBricks
+          bricks={bricks}
+          displayMode={displayMode}
+          highlightedPlacementIds={new Set(highlightedPlacementIds)}
+        />
       </Canvas>
     </div>
   );

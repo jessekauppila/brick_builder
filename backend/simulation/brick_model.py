@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from .brick_agent import BrickAgent
 from .builder_agent import BuilderAgent, list_continuity_modes, list_failure_policies
+from .competition_profiles import (
+    default_buildability_profile,
+    default_objective_weights,
+    get_archetype_profile,
+    list_archetypes,
+    list_scoring_categories,
+    list_strategy_shifts,
+    list_symmetry_modes,
+)
 from .placement_rules import list_placement_rules
 from .shapes import Vector3, get_shape, list_shapes
 from .world_state import WorldState
@@ -25,11 +34,17 @@ class BuilderConfig:
     color: str = "Red"
     shape_id: str = "bar_2x1"
     start_anchor: Vector3 = (0, 0, 0)
-    placement_rule_id: str = "alternating_sideways_vertical"
+    placement_rule_id: str = "competitive_growth"
     max_placements: int = DEFAULT_TOTAL_STEPS
     failure_policy: str = "backtrack"
     continuity_mode: str = "strict"
     max_backtrack_depth: Optional[int] = None
+    archetype: str = "territorial"
+    objective_weights: dict[str, float] = field(default_factory=dict)
+    allowed_strategy_shifts: tuple[str, ...] = ()
+    initial_strategy: str = "expand"
+    buildability_profile: dict[str, int | bool] = field(default_factory=dict)
+    symmetry_mode: str = "none"
 
     def to_dict(self):
         return {
@@ -42,6 +57,12 @@ class BuilderConfig:
             "failurePolicy": self.failure_policy,
             "continuityMode": self.continuity_mode,
             "maxBacktrackDepth": self.max_backtrack_depth,
+            "archetype": self.archetype,
+            "objectiveWeights": self.objective_weights,
+            "allowedStrategyShifts": list(self.allowed_strategy_shifts),
+            "initialStrategy": self.initial_strategy,
+            "buildabilityProfile": self.buildability_profile,
+            "symmetryMode": self.symmetry_mode,
         }
 
 
@@ -64,6 +85,7 @@ class BrickModel:
         self.bricks: list[BrickAgent] = []
         self.next_brick_id = 0
         self.trace = []
+        self.timeline: list[dict[str, object]] = []
         self.builder_agents = [
             BuilderAgent(
                 config=config,
@@ -89,17 +111,20 @@ class BrickModel:
                     active_builders += 1
                 if self._run_builder_step(builder_agent, tick):
                     placements_this_tick += 1
+            self.timeline.append(self._build_tick_snapshot(tick))
             if active_builders == 0 and placements_this_tick == 0:
                 self.log("No active builders remain; ending run early.")
                 break
         return self
 
     def _run_builder_step(self, builder_agent: BuilderAgent, tick: int):
+        prior_event_count = len(builder_agent.trace)
         result = builder_agent.step(self.world, tick)
-        if builder_agent.trace:
-            latest_event = builder_agent.trace[-1]
-            self.trace.append(latest_event.to_dict())
-            self.log(latest_event.message)
+        if len(builder_agent.trace) > prior_event_count:
+            new_events = builder_agent.trace[prior_event_count:]
+            for event in new_events:
+                self.trace.append(event.to_dict())
+                self.log(event.message)
 
         if not result.placed:
             return False
@@ -117,6 +142,9 @@ class BrickModel:
                     shape_id=builder_agent.config.shape_id,
                     placement_id=result.placement_id,
                     tick=tick,
+                    supported=result.supported,
+                    strategy=result.strategy,
+                    score=result.score_total,
                 )
             )
             self.next_brick_id += 1
@@ -160,12 +188,46 @@ class BrickModel:
                         "max_backtrack_depth",
                         builder.get("maxBacktrackDepth"),
                     ),
+                    archetype=builder.get("archetype", "territorial"),
+                    objective_weights=dict(
+                        builder.get("objective_weights", builder.get("objectiveWeights", {}))
+                    ),
+                    allowed_strategy_shifts=tuple(
+                        builder.get(
+                            "allowed_strategy_shifts",
+                            builder.get("allowedStrategyShifts", ()),
+                        )
+                    ),
+                    initial_strategy=builder.get(
+                        "initial_strategy",
+                        builder.get("initialStrategy", "expand"),
+                    ),
+                    buildability_profile=dict(
+                        builder.get(
+                            "buildability_profile",
+                            builder.get("buildabilityProfile", {}),
+                        )
+                    ),
+                    symmetry_mode=builder.get(
+                        "symmetry_mode",
+                        builder.get("symmetryMode", "none"),
+                    ),
                 )
 
             if config.id in seen_ids:
                 raise ValueError(f"Duplicate builder id '{config.id}'.")
 
             get_shape(config.shape_id)
+            profile = get_archetype_profile(config.archetype)
+            merged_weights = default_objective_weights(config.archetype)
+            merged_weights.update(config.objective_weights)
+            merged_buildability = default_buildability_profile(config.archetype)
+            merged_buildability.update(config.buildability_profile)
+            allowed_strategy_shifts = tuple(
+                config.allowed_strategy_shifts or profile.allowed_strategy_shifts
+            )
+            initial_strategy = config.initial_strategy or profile.initial_strategy
+
             if len(config.start_anchor) != 3:
                 raise ValueError(
                     f"Builder '{config.id}' must define a 3-value start_anchor."
@@ -193,8 +255,48 @@ class BrickModel:
                 raise ValueError(
                     f"Builder '{config.id}' must define max_backtrack_depth >= 1."
                 )
+            unknown_strategy_ids = set(allowed_strategy_shifts) - {
+                option["id"] for option in list_strategy_shifts()
+            }
+            if unknown_strategy_ids:
+                raise ValueError(
+                    f"Builder '{config.id}' has unknown strategy shifts "
+                    f"{sorted(unknown_strategy_ids)}."
+                )
+            if initial_strategy not in allowed_strategy_shifts:
+                raise ValueError(
+                    f"Builder '{config.id}' initial_strategy '{initial_strategy}' must "
+                    "be present in allowed_strategy_shifts."
+                )
+            if config.symmetry_mode not in {
+                option["id"] for option in list_symmetry_modes()
+            }:
+                raise ValueError(
+                    f"Builder '{config.id}' has unknown symmetry_mode "
+                    f"'{config.symmetry_mode}'."
+                )
 
-            builder_configs.append(config)
+            builder_configs.append(
+                BuilderConfig(
+                    id=config.id,
+                    color=config.color,
+                    shape_id=config.shape_id,
+                    start_anchor=config.start_anchor,
+                    placement_rule_id=config.placement_rule_id,
+                    max_placements=config.max_placements,
+                    failure_policy=config.failure_policy,
+                    continuity_mode=config.continuity_mode,
+                    max_backtrack_depth=config.max_backtrack_depth,
+                    archetype=config.archetype,
+                    objective_weights=merged_weights,
+                    allowed_strategy_shifts=allowed_strategy_shifts,
+                    initial_strategy=initial_strategy,
+                    buildability_profile=merged_buildability,
+                    symmetry_mode=config.symmetry_mode
+                    if config.symmetry_mode != "none"
+                    else profile.symmetry_mode,
+                )
+            )
             seen_ids.add(config.id)
 
         if not builder_configs:
@@ -227,36 +329,77 @@ class BrickModel:
             "builderStates": self.get_builder_states(),
             "bricks": [agent.to_dict() for agent in self.get_bricks()],
             "trace": self.trace,
+            "timeline": self.timeline,
             "catalog": {
                 "shapes": list_shapes(),
                 "placementRules": list_placement_rules(),
                 "failurePolicies": list_failure_policies(),
                 "continuityModes": list_continuity_modes(),
+                "archetypes": list_archetypes(),
+                "strategyShifts": list_strategy_shifts(),
+                "symmetryModes": list_symmetry_modes(),
+                "scoringCategories": list_scoring_categories(),
             },
+        }
+
+    def _build_tick_snapshot(self, tick: int) -> dict[str, object]:
+        events = [event for event in self.trace if event["tick"] == tick]
+        return {
+            "tick": tick,
+            "brickCount": len(self.bricks),
+            "placementCount": sum(
+                builder_agent.placement_count for builder_agent in self.builder_agents
+            ),
+            "builders": self.get_builder_states(),
+            "events": events,
         }
 
 
 def default_builder_configs(brick_unit=10):
     return [
         BuilderConfig(
-            id="red",
-            color="Red",
+            id="fortress-red",
+            color="#ef4444",
             shape_id="bar_2x1",
             start_anchor=(0, 0, 0),
-            placement_rule_id="alternating_sideways_vertical",
+            placement_rule_id="competitive_growth",
             max_placements=DEFAULT_TOTAL_STEPS,
             failure_policy="backtrack",
             continuity_mode="strict",
+            archetype="fortress",
         ),
         BuilderConfig(
-            id="blue",
-            color="Blue",
+            id="vine-blue",
+            color="#38bdf8",
             shape_id="bar_2x1",
             start_anchor=(brick_unit * 4, 0, 0),
-            placement_rule_id="alternating_sideways_vertical",
+            placement_rule_id="competitive_growth",
             max_placements=DEFAULT_TOTAL_STEPS,
             failure_policy="backtrack",
             continuity_mode="strict",
+            archetype="vine",
+        ),
+        BuilderConfig(
+            id="coral-green",
+            color="#22c55e",
+            shape_id="bar_3x1",
+            start_anchor=(0, brick_unit * 4, 0),
+            placement_rule_id="competitive_growth",
+            max_placements=DEFAULT_TOTAL_STEPS,
+            failure_policy="backtrack",
+            continuity_mode="strict",
+            archetype="coral",
+        ),
+        BuilderConfig(
+            id="territorial-gold",
+            color="#f59e0b",
+            shape_id="single_1x1",
+            start_anchor=(brick_unit * 4, brick_unit * 4, 0),
+            placement_rule_id="competitive_growth",
+            max_placements=DEFAULT_TOTAL_STEPS,
+            failure_policy="backtrack",
+            continuity_mode="strict",
+            archetype="territorial",
         ),
     ]
 

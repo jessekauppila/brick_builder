@@ -10,6 +10,12 @@ from pydantic import BaseModel, Field
 
 try:
     from .simulation.builder_agent import list_continuity_modes, list_failure_policies
+    from .simulation.competition_profiles import (
+        list_archetypes,
+        list_scoring_categories,
+        list_strategy_shifts,
+        list_symmetry_modes,
+    )
     from .simulation.brick_model import (
         EXPORTS_DIR,
         default_builder_configs,
@@ -20,6 +26,12 @@ try:
     from .simulation.shapes import list_shapes
 except ImportError:
     from simulation.builder_agent import list_continuity_modes, list_failure_policies
+    from simulation.competition_profiles import (
+        list_archetypes,
+        list_scoring_categories,
+        list_strategy_shifts,
+        list_symmetry_modes,
+    )
     from simulation.brick_model import (
         EXPORTS_DIR,
         default_builder_configs,
@@ -42,17 +54,33 @@ app.add_middleware(
 )
 
 
+class BuildabilityProfileRequest(BaseModel):
+    maxCantilever: Optional[int] = Field(default=None, ge=0, le=20)
+    maxUnsupportedHeight: Optional[int] = Field(default=None, ge=0, le=20)
+    requireSupportPath: Optional[bool] = None
+    allowPillarDrop: Optional[bool] = None
+    requireHostContact: Optional[bool] = None
+
+
 class GenerateRequest(BaseModel):
     class BuilderRequest(BaseModel):
         id: str = Field(min_length=1, max_length=50)
         color: str = Field(default="Red", min_length=1, max_length=50)
         shapeId: str = "bar_2x1"
         startAnchor: tuple[int, int, int] = (0, 0, 0)
-        placementRuleId: str = "alternating_sideways_vertical"
+        placementRuleId: str = "competitive_growth"
         maxPlacements: int = Field(default=200, ge=0, le=2000)
         failurePolicy: str = "backtrack"
         continuityMode: str = "strict"
         maxBacktrackDepth: Optional[int] = Field(default=None, ge=1, le=5000)
+        archetype: str = "territorial"
+        objectiveWeights: dict[str, float] = Field(default_factory=dict)
+        allowedStrategyShifts: list[str] = Field(default_factory=list)
+        initialStrategy: Optional[str] = None
+        buildabilityProfile: BuildabilityProfileRequest = Field(
+            default_factory=BuildabilityProfileRequest
+        )
+        symmetryMode: str = "none"
 
     totalSteps: int = Field(default=200, ge=1, le=2000)
     cubeCage: int = Field(default=200, ge=10, le=5000)
@@ -86,6 +114,10 @@ def get_catalog():
         "placementRules": list_placement_rules(),
         "failurePolicies": list_failure_policies(),
         "continuityModes": list_continuity_modes(),
+        "archetypes": list_archetypes(),
+        "strategyShifts": list_strategy_shifts(),
+        "symmetryModes": list_symmetry_modes(),
+        "scoringCategories": list_scoring_categories(),
         "defaultBuilders": [builder.to_dict() for builder in default_builder_configs()],
     }
 
@@ -115,6 +147,14 @@ def generate_model(payload: GenerateRequest, request: Request):
                 "failurePolicy": builder.failurePolicy,
                 "continuityMode": builder.continuityMode,
                 "maxBacktrackDepth": builder.maxBacktrackDepth,
+                "archetype": builder.archetype,
+                "objectiveWeights": builder.objectiveWeights,
+                "allowedStrategyShifts": builder.allowedStrategyShifts,
+                "initialStrategy": builder.initialStrategy,
+                "buildabilityProfile": builder.buildabilityProfile.model_dump(
+                    exclude_none=True
+                ),
+                "symmetryMode": builder.symmetryMode,
             }
             for builder in payload.builders
         ]

@@ -71,22 +71,24 @@ export function CollapsibleSection({
 
   return (
     <section className={cx("loupe-section", className)} data-open={isOpen}>
-      <button
-        className="loupe-section-summary"
-        type="button"
-        onClick={() => setIsOpen((current) => !current)}
-      >
-        <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-3">
-            <span className="loupe-summary-indicator" aria-hidden="true">
-              &rsaquo;
-            </span>
-            <span className="text-sm font-semibold tracking-wide text-white">{title}</span>
+      <div className="loupe-section-summary flex items-center justify-between gap-3">
+        <button
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-3">
+              <span className="loupe-summary-indicator" aria-hidden="true">
+                &rsaquo;
+              </span>
+              <span className="text-sm font-semibold tracking-wide text-white">{title}</span>
+            </div>
+            {description ? <p className="pl-6 text-xs leading-5 text-slate-400">{description}</p> : null}
           </div>
-          {description ? <p className="pl-6 text-xs leading-5 text-slate-400">{description}</p> : null}
-        </div>
-        {summary ? <div className="hidden min-w-0 items-center gap-2 text-xs text-slate-300 sm:flex">{summary}</div> : null}
-      </button>
+        </button>
+        {summary ? <div className="hidden shrink-0 items-center gap-2 text-xs text-slate-300 sm:flex">{summary}</div> : null}
+      </div>
       {isOpen ? (
         <div className={cx("border-t border-white/10 px-4 py-4", contentClassName)}>{children}</div>
       ) : null}
