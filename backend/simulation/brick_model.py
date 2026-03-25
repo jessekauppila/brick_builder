@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from .brick_agent import BrickAgent
 from .builder_agent import BuilderAgent, list_continuity_modes, list_failure_policies
+from .competition_profiles import (
+    list_archetypes,
+    list_scoring_categories,
+    list_strategy_shifts,
+    list_symmetry_modes,
+)
 from .placement_rules import list_placement_rules
 from .shapes import Vector3, get_shape, list_shapes
 from .world_state import WorldState
@@ -30,6 +36,12 @@ class BuilderConfig:
     failure_policy: str = "backtrack"
     continuity_mode: str = "strict"
     max_backtrack_depth: Optional[int] = None
+    archetype: str = "territorial"
+    objective_weights: dict[str, float] = field(default_factory=dict)
+    allowed_strategy_shifts: list[str] = field(default_factory=list)
+    initial_strategy: str = ""
+    buildability_profile: dict[str, int | bool] = field(default_factory=dict)
+    symmetry_mode: str = "none"
 
     def to_dict(self):
         return {
@@ -42,6 +54,12 @@ class BuilderConfig:
             "failurePolicy": self.failure_policy,
             "continuityMode": self.continuity_mode,
             "maxBacktrackDepth": self.max_backtrack_depth,
+            "archetype": self.archetype,
+            "objectiveWeights": dict(self.objective_weights),
+            "allowedStrategyShifts": list(self.allowed_strategy_shifts),
+            "initialStrategy": self.initial_strategy,
+            "buildabilityProfile": dict(self.buildability_profile),
+            "symmetryMode": self.symmetry_mode,
         }
 
 
@@ -160,6 +178,35 @@ class BrickModel:
                         "max_backtrack_depth",
                         builder.get("maxBacktrackDepth"),
                     ),
+                    archetype=builder.get("archetype", "territorial"),
+                    objective_weights=dict(
+                        builder.get(
+                            "objective_weights", builder.get("objectiveWeights", {})
+                        )
+                        or {}
+                    ),
+                    allowed_strategy_shifts=list(
+                        builder.get(
+                            "allowed_strategy_shifts",
+                            builder.get("allowedStrategyShifts", []),
+                        )
+                        or []
+                    ),
+                    initial_strategy=builder.get(
+                        "initial_strategy",
+                        builder.get("initialStrategy", ""),
+                    )
+                    or "",
+                    buildability_profile=dict(
+                        builder.get(
+                            "buildability_profile", builder.get("buildabilityProfile", {})
+                        )
+                        or {}
+                    ),
+                    symmetry_mode=builder.get(
+                        "symmetry_mode", builder.get("symmetryMode", "none")
+                    )
+                    or "none",
                 )
 
             if config.id in seen_ids:
@@ -232,6 +279,10 @@ class BrickModel:
                 "placementRules": list_placement_rules(),
                 "failurePolicies": list_failure_policies(),
                 "continuityModes": list_continuity_modes(),
+                "archetypes": list_archetypes(),
+                "strategyShifts": list_strategy_shifts(),
+                "symmetryModes": list_symmetry_modes(),
+                "scoringCategories": list_scoring_categories(),
             },
         }
 
@@ -284,8 +335,6 @@ def run_simulation(
     builders=None,
     verbose=False,
 ):
-    from .scad_export import build_scad, write_scad
-
     ensure_exports_dir()
     rng = random.Random(seed)
     model = BrickModel(
@@ -298,8 +347,7 @@ def run_simulation(
     model.run()
 
     simulation = model.to_dict()
-    scad_source = str(build_scad(model.get_bricks()))
-    simulation["scad"] = scad_source
+    simulation["scad"] = ""
     simulation["metadata"]["seed"] = seed
     simulation["metadata"]["outputPath"] = (
         str(scad_output_path) if scad_output_path else None
@@ -309,6 +357,10 @@ def run_simulation(
     )
 
     if scad_output_path:
+        from .scad_export import build_scad, write_scad
+
+        scad_source = str(build_scad(model.get_bricks()))
+        simulation["scad"] = scad_source
         write_scad(model.get_bricks(), scad_output_path)
 
     if json_output_path:
