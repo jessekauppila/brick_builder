@@ -8,6 +8,7 @@ from .shapes import HORIZONTAL_ORIENTATIONS, Vector3
 
 PLACEMENT_RULES = {
     "alternating_sideways_vertical": "Alternating Sideways / Vertical",
+    "competitive_growth": "Competitive Growth",
 }
 
 HORIZONTAL_DELTAS: dict[str, Vector3] = {
@@ -42,7 +43,7 @@ def build_candidates(
     brick_unit: int,
     local_step: int,
 ) -> list[PlacementCandidate]:
-    if placement_rule_id != "alternating_sideways_vertical":
+    if placement_rule_id not in {"alternating_sideways_vertical", "competitive_growth"}:
         known_rules = ", ".join(sorted(PLACEMENT_RULES))
         raise ValueError(
             f"Unknown placement_rule_id '{placement_rule_id}'. "

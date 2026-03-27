@@ -42,6 +42,7 @@ class BuilderConfig:
     initial_strategy: str = ""
     buildability_profile: dict[str, int | bool] = field(default_factory=dict)
     symmetry_mode: str = "none"
+    selection_mode: str = "legacy"
 
     def to_dict(self):
         return {
@@ -60,6 +61,7 @@ class BuilderConfig:
             "initialStrategy": self.initial_strategy,
             "buildabilityProfile": dict(self.buildability_profile),
             "symmetryMode": self.symmetry_mode,
+            "selectionMode": self.selection_mode,
         }
 
 
@@ -207,6 +209,10 @@ class BrickModel:
                         "symmetry_mode", builder.get("symmetryMode", "none")
                     )
                     or "none",
+                    selection_mode=builder.get(
+                        "selection_mode", builder.get("selectionMode", "legacy")
+                    )
+                    or "legacy",
                 )
 
             if config.id in seen_ids:
@@ -239,6 +245,11 @@ class BrickModel:
             if config.max_backtrack_depth is not None and config.max_backtrack_depth < 1:
                 raise ValueError(
                     f"Builder '{config.id}' must define max_backtrack_depth >= 1."
+                )
+            if config.selection_mode not in {"legacy", "competitive"}:
+                raise ValueError(
+                    f"Builder '{config.id}' has unknown selection_mode "
+                    f"'{config.selection_mode}'."
                 )
 
             builder_configs.append(config)

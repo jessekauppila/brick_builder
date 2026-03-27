@@ -81,6 +81,7 @@ class GenerateRequest(BaseModel):
             default_factory=BuildabilityProfileRequest
         )
         symmetryMode: str = "none"
+        selectionMode: str = "legacy"
 
     totalSteps: int = Field(default=200, ge=1, le=2000)
     cubeCage: int = Field(default=200, ge=10, le=5000)
@@ -155,6 +156,7 @@ def generate_model(payload: GenerateRequest, request: Request):
                     exclude_none=True
                 ),
                 "symmetryMode": builder.symmetryMode,
+                "selectionMode": builder.selectionMode,
             }
             for builder in payload.builders
         ]

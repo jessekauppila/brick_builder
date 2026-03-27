@@ -161,6 +161,16 @@ ARCHETYPE_PROFILES: dict[str, ArchetypeProfile] = {
 }
 
 
+def get_archetype_profile(archetype_id: str) -> ArchetypeProfile:
+    try:
+        return ARCHETYPE_PROFILES[archetype_id]
+    except KeyError as error:
+        known = ", ".join(sorted(ARCHETYPE_PROFILES))
+        raise ValueError(
+            f"Unknown archetype '{archetype_id}'. Expected one of: {known}."
+        ) from error
+
+
 def list_archetypes() -> list[dict[str, object]]:
     return [
         profile.to_catalog_dict()

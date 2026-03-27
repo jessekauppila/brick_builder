@@ -221,5 +221,102 @@ class BuilderAgentFailurePolicyTests(unittest.TestCase):
         self.assertEqual(first_cell, result.reference_cell)
 
 
+
+class Stop03SelectionModeTests(unittest.TestCase):
+    def test_non_fortress_competitive_matches_legacy(self):
+        """Competitive selection is ignored unless archetype is fortress."""
+        base = {
+            "id": "t1",
+            "color": "Red",
+            "shapeId": "bar_2x1",
+            "startAnchor": (0, 0, 0),
+            "placementRuleId": "alternating_sideways_vertical",
+            "maxPlacements": 4,
+            "failurePolicy": "backtrack",
+            "continuityMode": "strict",
+            "maxBacktrackDepth": 20,
+            "archetype": "territorial",
+        }
+        legacy = dict(base, selectionMode="legacy")
+        competitive = dict(base, selectionMode="competitive")
+        rng_seed = random.Random(11)
+        model_a = BrickModel(
+            total_steps=8,
+            cube_cage=80,
+            builders=[legacy],
+            rng=rng_seed,
+            verbose=False,
+        )
+        model_a.run()
+        rng_seed = random.Random(11)
+        model_b = BrickModel(
+            total_steps=8,
+            cube_cage=80,
+            builders=[competitive],
+            rng=rng_seed,
+            verbose=False,
+        )
+        model_b.run()
+        bricks_a = [b["position"] for b in model_a.to_dict()["bricks"]]
+        bricks_b = [b["position"] for b in model_b.to_dict()["bricks"]]
+        self.assertEqual(bricks_a, bricks_b)
+
+    def test_fortress_competitive_is_deterministic(self):
+        builder = {
+            "id": "fortress-test",
+            "archetype": "fortress",
+            "shapeId": "bar_2x1",
+            "startAnchor": (0, 0, 0),
+            "placementRuleId": "competitive_growth",
+            "maxPlacements": 12,
+            "failurePolicy": "backtrack",
+            "continuityMode": "strict",
+            "maxBacktrackDepth": 80,
+            "selectionMode": "competitive",
+        }
+
+        def run_once():
+            model = BrickModel(
+                total_steps=20,
+                cube_cage=100,
+                builders=[builder],
+                rng=random.Random(13),
+                verbose=False,
+            )
+            model.run()
+            return [tuple(b["position"]) for b in model.to_dict()["bricks"]]
+
+        self.assertEqual(run_once(), run_once())
+
+    def test_fortress_competitive_runs_successfully(self):
+        from backend.simulation.brick_model import run_simulation
+
+        result = run_simulation(
+            total_steps=20,
+            cube_cage=100,
+            scad_output_path=None,
+            json_output_path=None,
+            seed=13,
+            builders=[
+                {
+                    "id": "fortress-test",
+                    "archetype": "fortress",
+                    "shapeId": "bar_2x1",
+                    "startAnchor": [0, 0, 0],
+                    "placementRuleId": "competitive_growth",
+                    "maxPlacements": 40,
+                    "failurePolicy": "backtrack",
+                    "continuityMode": "strict",
+                    "maxBacktrackDepth": 80,
+                    "selectionMode": "competitive",
+                }
+            ],
+            verbose=False,
+        )
+        self.assertEqual(result["builderStates"][0]["id"], "fortress-test")
+        self.assertGreater(result["metadata"]["placementCount"], 0)
+
+
+
 if __name__ == "__main__":
     unittest.main()

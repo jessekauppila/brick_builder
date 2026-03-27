@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from random import Random
 from typing import Optional
 
+from .competition_profiles import get_archetype_profile
 from .placement_rules import PlacementCandidate, build_candidates
-from .shapes import BrickShape, Vector3
+from .shapes import BrickShape, Vector3, absolute_cells
 from .world_state import WorldState
 
 FAILURE_POLICY_LABELS = {
@@ -89,6 +90,93 @@ class BuilderAgent:
         self.cell_history: list[Vector3] = []
         self.trace: list[BuilderTraceEvent] = []
 
+    def _use_competitive_selection(self) -> bool:
+        """Stop 03: scored selection is enabled only for fortress archetypes."""
+        mode = getattr(self.config, "selection_mode", "legacy")
+        if mode != "competitive":
+            return False
+        return self.config.archetype == "fortress"
+
+    def _merged_objective_weights(self) -> dict[str, float]:
+        try:
+            profile = get_archetype_profile(self.config.archetype)
+            merged = dict(profile.default_objective_weights)
+        except ValueError:
+            merged = {}
+        merged.update(dict(self.config.objective_weights))
+        return merged
+
+    def _competitive_candidate_score(
+        self, world_state: WorldState, candidate: PlacementCandidate
+    ) -> float:
+        cells = absolute_cells(
+            self.shape, candidate.anchor, candidate.orientation, self.brick_unit
+        )
+        min_z = min(z for _, _, z in cells)
+        max_xy = max(abs(x) + abs(y) for x, y, z in cells) / self.brick_unit
+        touches_ground = min_z <= 0
+        chain_metric = 0.0
+        if self.last_anchor is not None:
+            ax, ay, az = candidate.anchor
+            lx, ly, lz = self.last_anchor
+            chain_metric = (
+                abs(ax - lx) + abs(ay - ly) + abs(az - lz)
+            ) / self.brick_unit
+        weights = self._merged_objective_weights()
+        raw_metrics = {
+            "territory": max_xy,
+            "surface": float(len(cells)),
+            "enclosure": float(-min_z) / self.brick_unit,
+            "chain": chain_metric,
+            "support": 2.0 if touches_ground else 0.25,
+            "choke": 0.0,
+            "symmetry": 0.0,
+        }
+        return sum(weights.get(key, 0.0) * value for key, value in raw_metrics.items())
+
+    def _select_candidate(
+        self,
+        world_state: WorldState,
+        candidates: list[PlacementCandidate],
+        strategy_prefix: str,
+        reference_cell: Optional[Vector3] = None,
+    ):
+        if self._use_competitive_selection():
+            best_candidate = None
+            best_score = None
+            best_tie = None
+            for candidate in candidates:
+                if not world_state.can_place(
+                    self.shape, candidate.anchor, candidate.orientation
+                ):
+                    continue
+                score = self._competitive_candidate_score(world_state, candidate)
+                tie = (candidate.anchor, candidate.orientation, candidate.mode)
+                if (
+                    best_candidate is None
+                    or score > best_score
+                    or (score == best_score and best_tie is not None and tie < best_tie)
+                ):
+                    best_candidate = candidate
+                    best_score = score
+                    best_tie = tie
+            if best_candidate is None:
+                return None
+            return (
+                best_candidate,
+                f"{strategy_prefix}_{best_candidate.mode}",
+                reference_cell or best_candidate.anchor,
+            )
+
+        for candidate in candidates:
+            if world_state.can_place(self.shape, candidate.anchor, candidate.orientation):
+                return (
+                    candidate,
+                    f"{strategy_prefix}_{candidate.mode}",
+                    reference_cell or candidate.anchor,
+                )
+        return None
+
     def step(self, world_state: WorldState, tick: int) -> BuilderStepResult:
         if self.status != "active":
             return self._emit(
@@ -120,7 +208,7 @@ class BuilderAgent:
             brick_unit=self.brick_unit,
             local_step=self.placement_count,
         )
-        direct_match = self._find_valid_candidate(
+        direct_match = self._select_candidate(
             world_state, direct_candidates, strategy_prefix="direct"
         )
         if direct_match:
@@ -209,7 +297,7 @@ class BuilderAgent:
                 brick_unit=self.brick_unit,
                 local_step=self.placement_count,
             )
-            match = self._find_valid_candidate(
+            match = self._select_candidate(
                 world_state,
                 candidates,
                 strategy_prefix="backtrack",
@@ -217,22 +305,6 @@ class BuilderAgent:
             )
             if match:
                 return match
-        return None
-
-    def _find_valid_candidate(
-        self,
-        world_state: WorldState,
-        candidates: list[PlacementCandidate],
-        strategy_prefix: str,
-        reference_cell: Optional[Vector3] = None,
-    ):
-        for candidate in candidates:
-            if world_state.can_place(self.shape, candidate.anchor, candidate.orientation):
-                return (
-                    candidate,
-                    f"{strategy_prefix}_{candidate.mode}",
-                    reference_cell or candidate.anchor,
-                )
         return None
 
     def _commit_placement(
