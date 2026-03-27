@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from random import Random
-from typing import Optional
+from typing import Any, Optional
 
 from .competition_profiles import get_archetype_profile
 from .placement_rules import PlacementCandidate, build_candidates
@@ -41,6 +41,14 @@ class BuilderTraceEvent:
     strategy: Optional[str] = None
     reference_cell: Optional[Vector3] = None
     status: Optional[str] = None
+    # Stop 04 telemetry: expose strategy transitions for debugging shifts.
+    previous_strategy: Optional[str] = None
+    strategy_changed: Optional[bool] = None
+    # Stop 04 telemetry: candidate/scoring diagnostics are additive fields.
+    selection_mode: Optional[str] = None
+    selected_candidate: Optional[dict[str, Any]] = None
+    score: Optional[dict[str, Any]] = None
+    markers: Optional[dict[str, bool]] = None
 
     def to_dict(self):
         return {
@@ -52,6 +60,12 @@ class BuilderTraceEvent:
             "strategy": self.strategy,
             "referenceCell": list(self.reference_cell) if self.reference_cell else None,
             "status": self.status,
+            "previousStrategy": self.previous_strategy,
+            "strategyChanged": self.strategy_changed,
+            "selectionMode": self.selection_mode,
+            "selectedCandidate": self.selected_candidate,
+            "score": self.score,
+            "markers": self.markers,
         }
 
 
@@ -89,6 +103,8 @@ class BuilderAgent:
         self.placement_history: list[PlacementRecord] = []
         self.cell_history: list[Vector3] = []
         self.trace: list[BuilderTraceEvent] = []
+        self.score = 0.0
+        self.last_strategy: Optional[str] = None
 
     def _use_competitive_selection(self) -> bool:
         """Stop 03: scored selection is enabled only for fortress archetypes."""
@@ -108,7 +124,7 @@ class BuilderAgent:
 
     def _competitive_candidate_score(
         self, world_state: WorldState, candidate: PlacementCandidate
-    ) -> float:
+    ) -> dict[str, Any]:
         cells = absolute_cells(
             self.shape, candidate.anchor, candidate.orientation, self.brick_unit
         )
@@ -132,7 +148,19 @@ class BuilderAgent:
             "choke": 0.0,
             "symmetry": 0.0,
         }
-        return sum(weights.get(key, 0.0) * value for key, value in raw_metrics.items())
+        category_breakdown = {
+            key: weights.get(key, 0.0) * value for key, value in raw_metrics.items()
+        }
+        total = sum(category_breakdown.values())
+        return {
+            "total": total,
+            "categoryBreakdown": category_breakdown,
+            "markers": {
+                "support": touches_ground,
+                # Stop 04 baseline keeps choke simple until dedicated geometry heuristic lands.
+                "choke": False,
+            },
+        }
 
     def _select_candidate(
         self,
@@ -144,36 +172,82 @@ class BuilderAgent:
         if self._use_competitive_selection():
             best_candidate = None
             best_score = None
+            second_best_score = None
             best_tie = None
+            best_score_info: dict[str, Any] = {}
             for candidate in candidates:
                 if not world_state.can_place(
                     self.shape, candidate.anchor, candidate.orientation
                 ):
                     continue
-                score = self._competitive_candidate_score(world_state, candidate)
+                score_info = self._competitive_candidate_score(world_state, candidate)
+                score = float(score_info["total"])
                 tie = (candidate.anchor, candidate.orientation, candidate.mode)
                 if (
                     best_candidate is None
                     or score > best_score
                     or (score == best_score and best_tie is not None and tie < best_tie)
                 ):
+                    second_best_score = best_score
                     best_candidate = candidate
                     best_score = score
                     best_tie = tie
+                    best_score_info = score_info
+                elif second_best_score is None or score > second_best_score:
+                    second_best_score = score
             if best_candidate is None:
                 return None
+            telemetry = {
+                "selectionMode": "competitive",
+                "selectedCandidate": {
+                    "anchor": list(best_candidate.anchor),
+                    "orientation": best_candidate.orientation,
+                    "mode": best_candidate.mode,
+                },
+                "score": {
+                    "total": round(float(best_score), 6),
+                    "deltaVsNextBest": round(
+                        float(
+                            best_score
+                            - (
+                                second_best_score
+                                if second_best_score is not None
+                                else best_score
+                            )
+                        ),
+                        6,
+                    ),
+                    "categoryBreakdown": {
+                        key: round(float(value), 6)
+                        for key, value in best_score_info["categoryBreakdown"].items()
+                    },
+                },
+                "markers": dict(best_score_info["markers"]),
+            }
             return (
                 best_candidate,
                 f"{strategy_prefix}_{best_candidate.mode}",
                 reference_cell or best_candidate.anchor,
+                telemetry,
             )
 
         for candidate in candidates:
             if world_state.can_place(self.shape, candidate.anchor, candidate.orientation):
+                legacy_telemetry = {
+                    "selectionMode": "legacy",
+                    "selectedCandidate": {
+                        "anchor": list(candidate.anchor),
+                        "orientation": candidate.orientation,
+                        "mode": candidate.mode,
+                    },
+                    "score": None,
+                    "markers": None,
+                }
                 return (
                     candidate,
                     f"{strategy_prefix}_{candidate.mode}",
                     reference_cell or candidate.anchor,
+                    legacy_telemetry,
                 )
         return None
 
@@ -218,6 +292,7 @@ class BuilderAgent:
                 candidate=direct_match[0],
                 strategy=direct_match[1],
                 reference_cell=direct_match[2],
+                telemetry=direct_match[3],
             )
 
         if self.config.failure_policy == "backtrack":
@@ -229,6 +304,7 @@ class BuilderAgent:
                     candidate=backtrack_match[0],
                     strategy=backtrack_match[1],
                     reference_cell=backtrack_match[2],
+                    telemetry=backtrack_match[3],
                 )
             return self._block(
                 tick,
@@ -280,6 +356,7 @@ class BuilderAgent:
             "lastOrientation": self.last_orientation,
             "lastAction": self.last_action,
             "blockedReason": self.blocked_reason,
+            "score": round(self.score, 3),
         }
 
     def _find_backtrack_candidate(self, world_state: WorldState):
@@ -314,6 +391,7 @@ class BuilderAgent:
         candidate: PlacementCandidate,
         strategy: str,
         reference_cell: Vector3,
+        telemetry: Optional[dict[str, Any]] = None,
     ) -> BuilderStepResult:
         occupied_cells = world_state.occupy(
             self.shape, candidate.anchor, candidate.orientation
@@ -331,11 +409,18 @@ class BuilderAgent:
             )
         )
         self.cell_history.extend(occupied_cells)
+        previous_strategy = self.last_strategy
+        strategy_changed = previous_strategy is not None and previous_strategy != strategy
+        self.last_strategy = strategy
         self.last_anchor = candidate.anchor
         self.last_orientation = candidate.orientation
         self.placement_count += 1
         self.last_action = "placed"
         self.blocked_reason = None
+        score_to_add = 1.0
+        if telemetry and isinstance(telemetry.get("score"), dict):
+            score_to_add = float(telemetry["score"].get("total", 1.0))
+        self.score += score_to_add
         return self._emit(
             tick,
             action="placed",
@@ -347,6 +432,12 @@ class BuilderAgent:
             strategy=strategy,
             reference_cell=reference_cell,
             status=self.status,
+            previous_strategy=previous_strategy,
+            strategy_changed=strategy_changed,
+            selection_mode=(telemetry or {}).get("selectionMode"),
+            selected_candidate=(telemetry or {}).get("selectedCandidate"),
+            score=(telemetry or {}).get("score"),
+            markers=(telemetry or {}).get("markers"),
             placed=True,
             cells=occupied_cells,
         )
@@ -371,6 +462,12 @@ class BuilderAgent:
         strategy: Optional[str] = None,
         reference_cell: Optional[Vector3] = None,
         status: Optional[str] = None,
+        previous_strategy: Optional[str] = None,
+        strategy_changed: Optional[bool] = None,
+        selection_mode: Optional[str] = None,
+        selected_candidate: Optional[dict[str, Any]] = None,
+        score: Optional[dict[str, Any]] = None,
+        markers: Optional[dict[str, bool]] = None,
         placed: bool = False,
         cells: Optional[list[Vector3]] = None,
     ) -> BuilderStepResult:
@@ -385,6 +482,12 @@ class BuilderAgent:
             strategy=strategy,
             reference_cell=reference_cell,
             status=status or self.status,
+            previous_strategy=previous_strategy,
+            strategy_changed=strategy_changed,
+            selection_mode=selection_mode,
+            selected_candidate=selected_candidate,
+            score=score,
+            markers=markers,
         )
         self.trace.append(event)
         if self.verbose:

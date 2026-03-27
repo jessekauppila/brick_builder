@@ -317,6 +317,86 @@ class Stop03SelectionModeTests(unittest.TestCase):
         self.assertGreater(result["metadata"]["placementCount"], 0)
 
 
+class Stop04TelemetryBalanceTests(unittest.TestCase):
+    def test_trace_contains_additive_telemetry_fields(self):
+        from backend.simulation.brick_model import run_simulation
+
+        simulation = run_simulation(
+            total_steps=10,
+            cube_cage=90,
+            scad_output_path=None,
+            json_output_path=None,
+            seed=5,
+            builders=[
+                {
+                    "id": "fortress-trace",
+                    "archetype": "fortress",
+                    "shapeId": "bar_2x1",
+                    "startAnchor": [0, 0, 0],
+                    "placementRuleId": "competitive_growth",
+                    "maxPlacements": 8,
+                    "failurePolicy": "backtrack",
+                    "continuityMode": "strict",
+                    "maxBacktrackDepth": 40,
+                    "selectionMode": "competitive",
+                }
+            ],
+            verbose=False,
+        )
+
+        placed_events = [e for e in simulation["trace"] if e["action"] == "placed"]
+        self.assertTrue(placed_events)
+        sample = placed_events[0]
+        self.assertIn("strategyChanged", sample)
+        self.assertIn("previousStrategy", sample)
+        self.assertIn("score", sample)
+        self.assertIn("markers", sample)
+        self.assertIsInstance(sample["score"], dict)
+        self.assertIn("deltaVsNextBest", sample["score"])
+        self.assertIn("categoryBreakdown", sample["score"])
+        self.assertIsInstance(sample["markers"], dict)
+        self.assertIn("support", sample["markers"])
+        self.assertIn("choke", sample["markers"])
+
+    def test_timeline_snapshots_present_and_non_empty(self):
+        from backend.simulation.brick_model import run_simulation
+
+        simulation = run_simulation(
+            total_steps=8,
+            cube_cage=90,
+            scad_output_path=None,
+            json_output_path=None,
+            seed=5,
+            verbose=False,
+        )
+        self.assertTrue(simulation.get("trace"))
+        self.assertTrue(simulation.get("timeline"))
+        snapshot = simulation["timeline"][0]
+        self.assertIn("tick", snapshot)
+        self.assertIn("placementsThisTick", snapshot)
+        self.assertIn("scoresByBuilder", snapshot)
+        self.assertIn("actions", snapshot)
+
+    def test_balance_harness_summary_keys(self):
+        from backend.simulation.balance_harness import (
+            run_matchup_series,
+            summarize_matchup_series,
+        )
+        from backend.simulation.brick_model import default_builder_configs
+
+        results = run_matchup_series(
+            default_builder_configs()[:2],
+            [1, 2, 3],
+            total_steps=40,
+            cube_cage=120,
+        )
+        summary = summarize_matchup_series(results)
+        self.assertEqual(3, summary["matchCount"])
+        self.assertIn("winRates", summary)
+        self.assertIn("averageScoreGap", summary)
+        self.assertIn("results", summary)
+        self.assertEqual(3, len(summary["results"]))
+
 
 if __name__ == "__main__":
     unittest.main()

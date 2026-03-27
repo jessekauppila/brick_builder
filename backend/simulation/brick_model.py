@@ -84,6 +84,8 @@ class BrickModel:
         self.bricks: list[BrickAgent] = []
         self.next_brick_id = 0
         self.trace = []
+        # Stop 04 telemetry: timeline captures tick-by-tick simulation state.
+        self.timeline = []
         self.builder_agents = [
             BuilderAgent(
                 config=config,
@@ -103,26 +105,61 @@ class BrickModel:
         for tick in range(self.total_steps):
             self.log(f"Tick {tick}")
             placements_this_tick = 0
-            active_builders = 0
+            active_builders_before = sum(
+                1 for builder_agent in self.builder_agents if builder_agent.status == "active"
+            )
+            actions = []
             for builder_agent in self.builder_agents:
-                if builder_agent.status == "active":
-                    active_builders += 1
-                if self._run_builder_step(builder_agent, tick):
+                placed, event = self._run_builder_step(builder_agent, tick)
+                if placed:
                     placements_this_tick += 1
-            if active_builders == 0 and placements_this_tick == 0:
+                if event:
+                    actions.append(
+                        {
+                            "builderId": event["builderId"],
+                            "action": event["action"],
+                            "strategy": event.get("strategy"),
+                        }
+                    )
+
+            # Stop 04 baseline snapshot: lightweight per-tick state for post-run analysis.
+            self.timeline.append(
+                {
+                    "tick": tick,
+                    "placementsThisTick": placements_this_tick,
+                    "activeBuilders": sum(
+                        1
+                        for builder_agent in self.builder_agents
+                        if builder_agent.status == "active"
+                    ),
+                    "blockedBuilders": sum(
+                        1
+                        for builder_agent in self.builder_agents
+                        if builder_agent.status == "blocked"
+                    ),
+                    "scoresByBuilder": {
+                        builder_agent.config.id: round(builder_agent.score, 3)
+                        for builder_agent in self.builder_agents
+                    },
+                    "actions": actions,
+                }
+            )
+            if active_builders_before == 0 and placements_this_tick == 0:
                 self.log("No active builders remain; ending run early.")
                 break
         return self
 
     def _run_builder_step(self, builder_agent: BuilderAgent, tick: int):
         result = builder_agent.step(self.world, tick)
+        latest_event_dict = None
         if builder_agent.trace:
             latest_event = builder_agent.trace[-1]
-            self.trace.append(latest_event.to_dict())
+            latest_event_dict = latest_event.to_dict()
+            self.trace.append(latest_event_dict)
             self.log(latest_event.message)
 
         if not result.placed:
-            return False
+            return False, latest_event_dict
 
         for brick_x, brick_y, brick_z in result.cells:
             self.bricks.append(
@@ -140,7 +177,7 @@ class BrickModel:
                 )
             )
             self.next_brick_id += 1
-        return True
+        return True, latest_event_dict
 
     def _normalize_builders(self, builders):
         normalized = builders or default_builder_configs(self.brick_unit)
@@ -285,6 +322,7 @@ class BrickModel:
             "builderStates": self.get_builder_states(),
             "bricks": [agent.to_dict() for agent in self.get_bricks()],
             "trace": self.trace,
+            "timeline": self.timeline,
             "catalog": {
                 "shapes": list_shapes(),
                 "placementRules": list_placement_rules(),
