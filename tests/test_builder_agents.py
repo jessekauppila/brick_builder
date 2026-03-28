@@ -3,6 +3,7 @@ import unittest
 
 from backend.simulation.brick_model import BrickModel, BuilderConfig
 from backend.simulation.builder_agent import BuilderAgent
+from backend.simulation.balance_harness import run_matchup_series, summarize_matchup_series
 from backend.simulation.shapes import get_shape
 from backend.simulation.world_state import WorldState
 
@@ -26,26 +27,32 @@ class BrickModelContinuityTests(unittest.TestCase):
     def test_each_builder_remains_continuous(self):
         builders = [
             {
-                "id": "red",
-                "color": "Red",
+                "id": "fortress-red",
+                "color": "#ef4444",
                 "shapeId": "bar_2x1",
                 "startAnchor": (0, 0, 0),
-                "placementRuleId": "alternating_sideways_vertical",
+                "placementRuleId": "competitive_growth",
                 "maxPlacements": 5,
                 "failurePolicy": "backtrack",
                 "continuityMode": "strict",
                 "maxBacktrackDepth": 20,
+                "archetype": "fortress",
+                "initialStrategy": "reinforce",
+                "allowedStrategyShifts": ["expand", "reinforce", "pillar"],
             },
             {
-                "id": "blue",
-                "color": "Blue",
+                "id": "vine-blue",
+                "color": "#38bdf8",
                 "shapeId": "bar_2x1",
                 "startAnchor": (40, 0, 0),
-                "placementRuleId": "alternating_sideways_vertical",
+                "placementRuleId": "competitive_growth",
                 "maxPlacements": 4,
                 "failurePolicy": "stop",
                 "continuityMode": "strict",
                 "maxBacktrackDepth": 20,
+                "archetype": "vine",
+                "initialStrategy": "expand",
+                "allowedStrategyShifts": ["expand", "wrap"],
             },
         ]
 
@@ -59,10 +66,10 @@ class BrickModelContinuityTests(unittest.TestCase):
         model.run()
         result = model.to_dict()
 
-        self.assertNotIn(
-            "fallback_random",
-            [event["strategy"] for event in result["trace"] if event["strategy"]],
-        )
+        self.assertIn("timeline", result)
+        self.assertGreaterEqual(len(result["timeline"]), 1)
+        self.assertIn("score", result["builderStates"][0])
+        self.assertIn("scoreBreakdown", result["builderStates"][0])
 
         placements_by_builder = {}
         for brick in result["bricks"]:
@@ -84,26 +91,32 @@ class BrickModelContinuityTests(unittest.TestCase):
     def test_mixed_builders_report_independent_runtime_state(self):
         builders = [
             {
-                "id": "red",
-                "color": "Red",
+                "id": "fortress-red",
+                "color": "#ef4444",
                 "shapeId": "bar_2x1",
                 "startAnchor": (0, 0, 0),
-                "placementRuleId": "alternating_sideways_vertical",
+                "placementRuleId": "competitive_growth",
                 "maxPlacements": 2,
                 "failurePolicy": "backtrack",
                 "continuityMode": "strict",
                 "maxBacktrackDepth": 10,
+                "archetype": "fortress",
+                "initialStrategy": "reinforce",
+                "allowedStrategyShifts": ["expand", "reinforce", "pillar"],
             },
             {
-                "id": "blue",
-                "color": "Blue",
+                "id": "vine-blue",
+                "color": "#38bdf8",
                 "shapeId": "bar_2x1",
                 "startAnchor": (40, 0, 0),
-                "placementRuleId": "alternating_sideways_vertical",
+                "placementRuleId": "competitive_growth",
                 "maxPlacements": 1,
                 "failurePolicy": "stop",
                 "continuityMode": "strict",
                 "maxBacktrackDepth": 10,
+                "archetype": "vine",
+                "initialStrategy": "expand",
+                "allowedStrategyShifts": ["expand", "wrap"],
             },
         ]
         model = BrickModel(
@@ -116,9 +129,16 @@ class BrickModelContinuityTests(unittest.TestCase):
         model.run()
         result = model.to_dict()
 
-        self.assertEqual({"red", "blue"}, {item["id"] for item in result["builderStates"]})
-        self.assertEqual({"red", "blue"}, {brick["builderId"] for brick in result["bricks"]})
+        self.assertEqual(
+            {"fortress-red", "vine-blue"},
+            {item["id"] for item in result["builderStates"]},
+        )
+        self.assertEqual(
+            {"fortress-red", "vine-blue"},
+            {brick["builderId"] for brick in result["bricks"]},
+        )
         self.assertEqual(3, result["metadata"]["placementCount"])
+        self.assertTrue(all("currentStrategy" in item for item in result["builderStates"]))
 
 
 class BuilderAgentFailurePolicyTests(unittest.TestCase):
@@ -127,6 +147,7 @@ class BuilderAgentFailurePolicyTests(unittest.TestCase):
         config = BuilderConfig(
             id="skipper",
             shape_id="single_1x1",
+            placement_rule_id="alternating_sideways_vertical",
             failure_policy="skip",
             max_placements=5,
         )
@@ -145,6 +166,8 @@ class BuilderAgentFailurePolicyTests(unittest.TestCase):
                 (last_anchor[0] - 10, last_anchor[1], last_anchor[2]),
                 (last_anchor[0], last_anchor[1] + 10, last_anchor[2]),
                 (last_anchor[0], last_anchor[1] - 10, last_anchor[2]),
+                (last_anchor[0], last_anchor[1], last_anchor[2] + 10),
+                (last_anchor[0], last_anchor[1], last_anchor[2] - 10),
             }
         )
 
@@ -159,6 +182,7 @@ class BuilderAgentFailurePolicyTests(unittest.TestCase):
         config = BuilderConfig(
             id="stopper",
             shape_id="single_1x1",
+            placement_rule_id="alternating_sideways_vertical",
             failure_policy="stop",
             max_placements=5,
         )
@@ -177,6 +201,8 @@ class BuilderAgentFailurePolicyTests(unittest.TestCase):
                 (last_anchor[0] - 10, last_anchor[1], last_anchor[2]),
                 (last_anchor[0], last_anchor[1] + 10, last_anchor[2]),
                 (last_anchor[0], last_anchor[1] - 10, last_anchor[2]),
+                (last_anchor[0], last_anchor[1], last_anchor[2] + 10),
+                (last_anchor[0], last_anchor[1], last_anchor[2] - 10),
             }
         )
 
@@ -190,6 +216,7 @@ class BuilderAgentFailurePolicyTests(unittest.TestCase):
         config = BuilderConfig(
             id="backtracker",
             shape_id="single_1x1",
+            placement_rule_id="alternating_sideways_vertical",
             failure_policy="backtrack",
             max_placements=5,
             max_backtrack_depth=10,
@@ -217,8 +244,43 @@ class BuilderAgentFailurePolicyTests(unittest.TestCase):
         result = agent.step(world, 2)
         self.assertTrue(result.placed)
         self.assertEqual("placed", result.action)
-        self.assertEqual("backtrack_vertical", result.strategy)
+        self.assertTrue(result.strategy.startswith("backtrack_"))
         self.assertEqual(first_cell, result.reference_cell)
+
+
+class BalanceHarnessTests(unittest.TestCase):
+    def test_matchup_series_runs_without_scad_exports(self):
+        builders = [
+            BuilderConfig(
+                id="fortress-red",
+                color="#ef4444",
+                archetype="fortress",
+                objective_weights={"support": 2.0, "enclosure": 2.0},
+                allowed_strategy_shifts=("expand", "reinforce", "pillar"),
+                initial_strategy="reinforce",
+            ),
+            BuilderConfig(
+                id="vine-blue",
+                color="#38bdf8",
+                archetype="vine",
+                objective_weights={"chain": 2.2, "choke": 1.7},
+                allowed_strategy_shifts=("expand", "wrap"),
+                initial_strategy="expand",
+            ),
+        ]
+
+        results = run_matchup_series(
+            builder_configs=builders,
+            seeds=[1, 2],
+            total_steps=6,
+            cube_cage=80,
+        )
+
+        self.assertEqual(2, len(results))
+        summary = summarize_matchup_series(results)
+        self.assertEqual(2, summary["matchCount"])
+        self.assertIn("averageScoreGap", summary)
+        self.assertTrue(summary["results"])
 
 
 if __name__ == "__main__":

@@ -14,6 +14,9 @@ class BrickAgent:
     shape_id: Optional[str] = None
     placement_id: Optional[str] = None
     tick: Optional[int] = None
+    supported: Optional[bool] = None
+    strategy: Optional[str] = None
+    score: Optional[float] = None
 
     def to_dict(self):
         return {
@@ -25,4 +28,7 @@ class BrickAgent:
             "shapeId": self.shape_id,
             "placementId": self.placement_id,
             "tick": self.tick,
+            "supported": self.supported,
+            "strategy": self.strategy,
+            "score": self.score,
         }

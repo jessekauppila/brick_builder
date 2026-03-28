@@ -22,6 +22,10 @@ type BuilderInput = {
   failurePolicy: string;
   continuityMode: string;
   maxBacktrackDepth: string;
+  archetype: string;
+  selectionMode: string;
+  symmetryMode: string;
+  objectiveWeightsJson: string;
 };
 
 type CatalogOption = {
@@ -29,22 +33,31 @@ type CatalogOption = {
   label: string;
 };
 
+type CatalogDefaultBuilder = {
+  id: string;
+  color: string;
+  shapeId: string;
+  startAnchor: [number, number, number];
+  placementRuleId: string;
+  maxPlacements: number;
+  failurePolicy: string;
+  continuityMode: string;
+  maxBacktrackDepth: number | null;
+  archetype?: string;
+  selectionMode?: string;
+  symmetryMode?: string;
+  objectiveWeights?: Record<string, number>;
+};
+
 type CatalogResponse = {
   shapes: CatalogOption[];
   placementRules: CatalogOption[];
   failurePolicies: CatalogOption[];
   continuityModes: CatalogOption[];
-  defaultBuilders: {
-    id: string;
-    color: string;
-    shapeId: string;
-    startAnchor: [number, number, number];
-    placementRuleId: string;
-    maxPlacements: number;
-    failurePolicy: string;
-    continuityMode: string;
-    maxBacktrackDepth: number | null;
-  }[];
+  archetypes?: CatalogOption[];
+  symmetryModes?: CatalogOption[];
+  scoringCategories?: CatalogOption[];
+  defaultBuilders: CatalogDefaultBuilder[];
 };
 
 type BuilderRuntimeState = {
@@ -59,7 +72,16 @@ type BuilderRuntimeState = {
   lastOrientation: string | null;
   lastAction: string;
   blockedReason: string | null;
+  score?: number;
+  archetype?: string;
+  currentStrategy?: string;
+  symmetryMode?: string;
+  allowedStrategyShifts?: string[];
+  scoreBreakdown?: Record<string, number>;
+  buildabilityProfile?: Record<string, number | boolean>;
 };
+
+type TraceScoreLine = { category: string; points: number; reason?: string };
 
 type TraceEvent = {
   tick: number;
@@ -70,6 +92,36 @@ type TraceEvent = {
   strategy: string | null;
   referenceCell: [number, number, number] | null;
   status: string | null;
+  scoreDelta?: number;
+  scores?: TraceScoreLine[];
+  runningScore?: number;
+  strategyBefore?: string | null;
+  strategyAfter?: string | null;
+  supportPathExists?: boolean | null;
+  supported?: boolean | null;
+  previousStrategy?: string | null;
+  strategyChanged?: boolean | null;
+  selectionMode?: string | null;
+  selectedCandidate?: unknown;
+  score?: {
+    total?: number;
+    deltaVsNextBest?: number;
+    categoryBreakdown?: Record<string, number>;
+  } | null;
+  markers?: { support?: boolean; choke?: boolean } | null;
+};
+
+type TimelineSnapshot = {
+  tick: number;
+  brickCount?: number;
+  placementCount?: number;
+  placementsThisTick?: number;
+  activeBuilders?: number;
+  blockedBuilders?: number;
+  scoresByBuilder?: Record<string, number>;
+  actions?: Array<{ builderId: string; action: string; strategy: string | null }>;
+  builders?: BuilderRuntimeState[];
+  events?: TraceEvent[];
 };
 
 type SimulationResponse = {
@@ -94,16 +146,40 @@ type SimulationResponse = {
     failurePolicy: string;
     continuityMode: string;
     maxBacktrackDepth: number | null;
+    archetype?: string;
+    selectionMode?: string;
+    symmetryMode?: string;
+    objectiveWeights?: Record<string, number>;
   }[];
   builderStates: BuilderRuntimeState[];
   bricks: BrickRecord[];
   trace: TraceEvent[];
+  timeline?: TimelineSnapshot[];
   scad: string;
   downloadUrl: string | null;
   jsonDownloadUrl: string | null;
 };
 
+type BalanceSummaryResponse = {
+  matchCount: number;
+  winRates: Record<string, number>;
+  averageScoreGap: number;
+  results: Array<{
+    seed: number;
+    builderIds: string[];
+    winnerId: string;
+    scoreGap: number;
+    scores: Record<string, number>;
+  }>;
+};
+
 const DEFAULT_API_URL = process.env.NEXT_PUBLIC_BRICK_API_URL ?? "http://127.0.0.1:8000";
+
+const SELECTION_MODE_OPTIONS: CatalogOption[] = [
+  { id: "legacy", label: "Legacy (first valid)" },
+  { id: "competitive", label: "Competitive (scored)" },
+];
+
 const DEFAULT_CATALOG: CatalogResponse = {
   shapes: [
     { id: "single_1x1", label: "1x1" },
@@ -115,6 +191,7 @@ const DEFAULT_CATALOG: CatalogResponse = {
       id: "alternating_sideways_vertical",
       label: "Alternating Sideways / Vertical",
     },
+    { id: "competitive_growth", label: "Competitive Growth" },
   ],
   failurePolicies: [
     { id: "backtrack", label: "Backtrack Through History" },
@@ -123,6 +200,9 @@ const DEFAULT_CATALOG: CatalogResponse = {
     { id: "fallback_random", label: "Fallback To Random Placement" },
   ],
   continuityModes: [{ id: "strict", label: "Strict Continuity" }],
+  archetypes: [{ id: "territorial", label: "Territorial" }],
+  symmetryModes: [{ id: "none", label: "None" }],
+  scoringCategories: [],
   defaultBuilders: [
     {
       id: "red",
@@ -134,6 +214,10 @@ const DEFAULT_CATALOG: CatalogResponse = {
       failurePolicy: "backtrack",
       continuityMode: "strict",
       maxBacktrackDepth: 200,
+      archetype: "territorial",
+      selectionMode: "legacy",
+      symmetryMode: "none",
+      objectiveWeights: {},
     },
     {
       id: "blue",
@@ -145,11 +229,16 @@ const DEFAULT_CATALOG: CatalogResponse = {
       failurePolicy: "backtrack",
       continuityMode: "strict",
       maxBacktrackDepth: 200,
+      archetype: "territorial",
+      selectionMode: "legacy",
+      symmetryMode: "none",
+      objectiveWeights: {},
     },
   ],
 };
 
 function toBuilderInput(builder: CatalogResponse["defaultBuilders"][number]): BuilderInput {
+  const weights = builder.objectiveWeights ?? {};
   return {
     id: builder.id,
     color: builder.color,
@@ -161,6 +250,10 @@ function toBuilderInput(builder: CatalogResponse["defaultBuilders"][number]): Bu
     continuityMode: builder.continuityMode,
     maxBacktrackDepth:
       builder.maxBacktrackDepth === null ? "" : String(builder.maxBacktrackDepth),
+    archetype: builder.archetype ?? "territorial",
+    selectionMode: builder.selectionMode ?? "legacy",
+    symmetryMode: builder.symmetryMode ?? "none",
+    objectiveWeightsJson: JSON.stringify(weights),
   };
 }
 
@@ -176,11 +269,126 @@ function createBuilder(index: number): BuilderInput {
     failurePolicy: DEFAULT_CATALOG.failurePolicies[0]?.id ?? "backtrack",
     continuityMode: DEFAULT_CATALOG.continuityModes[0]?.id ?? "strict",
     maxBacktrackDepth: "50",
+    archetype: DEFAULT_CATALOG.archetypes?.[0]?.id ?? "territorial",
+    selectionMode: "legacy",
+    symmetryMode: DEFAULT_CATALOG.symmetryModes?.[0]?.id ?? "none",
+    objectiveWeightsJson: "{}",
   };
 }
 
 function getOptionLabel(options: CatalogOption[], value: string) {
   return options.find((option) => option.id === value)?.label ?? value;
+}
+
+function buildSimulationBuildersPayload(builders: BuilderInput[]) {
+  const payload: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < builders.length; index += 1) {
+    const builder = builders[index];
+    let objectiveWeights: Record<string, number> = {};
+    const raw = builder.objectiveWeightsJson.trim();
+    if (raw.length > 0) {
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return {
+            ok: false as const,
+            error: `Builder ${index + 1}: objective weights must be a JSON object.`,
+          };
+        }
+        for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+          const n = Number(value);
+          if (Number.isNaN(n)) {
+            return {
+              ok: false as const,
+              error: `Builder ${index + 1}: invalid number for weight "${key}".`,
+            };
+          }
+          objectiveWeights[key] = n;
+        }
+      } catch {
+        return {
+          ok: false as const,
+          error: `Builder ${index + 1}: invalid objective weights JSON.`,
+        };
+      }
+    }
+    payload.push({
+      id: builder.id.trim(),
+      color: builder.color.trim(),
+      shapeId: builder.shapeId,
+      startAnchor: builder.startAnchor.map((value) => Number(value)) as [number, number, number],
+      placementRuleId: builder.placementRuleId,
+      maxPlacements: Number(builder.maxPlacements),
+      failurePolicy: builder.failurePolicy,
+      continuityMode: builder.continuityMode,
+      maxBacktrackDepth:
+        builder.maxBacktrackDepth === "" ? null : Number(builder.maxBacktrackDepth),
+      archetype: builder.archetype,
+      selectionMode: builder.selectionMode,
+      symmetryMode: builder.symmetryMode,
+      objectiveWeights,
+      allowedStrategyShifts: [],
+      initialStrategy: null,
+      buildabilityProfile: {},
+    });
+  }
+  return { ok: true as const, builders: payload };
+}
+
+function formatTelemetryScoreSummary(event: TraceEvent): string {
+  if (event.score && typeof event.score === "object") {
+    const breakdown = event.score.categoryBreakdown;
+    if (breakdown && Object.keys(breakdown).length > 0) {
+      return Object.entries(breakdown)
+        .slice(0, 5)
+        .map(([key, value]) => `${key}:${Number(value).toFixed(2)}`)
+        .join(" ");
+    }
+    if (event.score.total != null) {
+      return `total ${Number(event.score.total).toFixed(3)}`;
+    }
+  }
+  if (event.scores && event.scores.length > 0) {
+    return event.scores
+      .slice(0, 5)
+      .map((line) => `${line.category}:${Number(line.points).toFixed(2)}`)
+      .join(" ");
+  }
+  return "—";
+}
+
+function telemetryDelta(event: TraceEvent): string {
+  if (event.score?.deltaVsNextBest != null) {
+    return Number(event.score.deltaVsNextBest).toFixed(3);
+  }
+  if (event.scoreDelta != null) {
+    return Number(event.scoreDelta).toFixed(3);
+  }
+  return "—";
+}
+
+function telemetryRunning(event: TraceEvent): string {
+  if (event.score?.total != null) {
+    return Number(event.score.total).toFixed(3);
+  }
+  if (event.runningScore != null) {
+    return Number(event.runningScore).toFixed(3);
+  }
+  return "—";
+}
+
+function telemetrySupport(event: TraceEvent): string {
+  if (event.markers) {
+    return `s:${event.markers.support ? "Y" : "N"} c:${event.markers.choke ? "Y" : "N"}`;
+  }
+  const parts: string[] = [];
+  if (event.supported != null) {
+    parts.push(`sup:${event.supported ? "Y" : "N"}`);
+  }
+  if (event.supportPathExists != null) {
+    parts.push(`path:${event.supportPathExists ? "Y" : "N"}`);
+  }
+  return parts.length > 0 ? parts.join(" ") : "—";
 }
 
 export function BrickBuilderStudio() {
@@ -197,6 +405,12 @@ export function BrickBuilderStudio() {
   const [result, setResult] = useState<SimulationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [balanceSeeds, setBalanceSeeds] = useState("1,2,3");
+  const [balanceTotalSteps, setBalanceTotalSteps] = useState("40");
+  const [balanceCubeCage, setBalanceCubeCage] = useState("120");
+  const [balanceResult, setBalanceResult] = useState<BalanceSummaryResponse | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -268,6 +482,34 @@ export function BrickBuilderStudio() {
     () => result?.trace.slice(-20).reverse() ?? [],
     [result],
   );
+
+  const archetypeOptions = useMemo(
+    () =>
+      catalog.archetypes && catalog.archetypes.length > 0
+        ? catalog.archetypes
+        : [{ id: "territorial", label: "Territorial" }],
+    [catalog.archetypes],
+  );
+
+  const symmetryOptions = useMemo(
+    () =>
+      catalog.symmetryModes && catalog.symmetryModes.length > 0
+        ? catalog.symmetryModes
+        : [{ id: "none", label: "None" }],
+    [catalog.symmetryModes],
+  );
+
+  const recentTimeline = useMemo(() => result?.timeline?.slice(-30) ?? [], [result]);
+
+  const placementTelemetry = useMemo(
+    () =>
+      (result?.trace ?? [])
+        .filter((event) => event.action === "placed")
+        .slice(-25)
+        .reverse(),
+    [result],
+  );
+
   const generationTone = error
     ? "bad"
     : isLoading
@@ -290,6 +532,13 @@ export function BrickBuilderStudio() {
     setIsLoading(true);
     setError(null);
 
+    const built = buildSimulationBuildersPayload(builders);
+    if (!built.ok) {
+      setError(built.error);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch(`${DEFAULT_API_URL}/generate`, {
         method: "POST",
@@ -302,24 +551,7 @@ export function BrickBuilderStudio() {
           seed: seed === "" ? null : Number(seed),
           saveScad,
           fileName,
-          builders: builders.map((builder) => ({
-            id: builder.id.trim(),
-            color: builder.color.trim(),
-            shapeId: builder.shapeId,
-            startAnchor: builder.startAnchor.map((value) => Number(value)) as [
-              number,
-              number,
-              number,
-            ],
-            placementRuleId: builder.placementRuleId,
-            maxPlacements: Number(builder.maxPlacements),
-            failurePolicy: builder.failurePolicy,
-            continuityMode: builder.continuityMode,
-            maxBacktrackDepth:
-              builder.maxBacktrackDepth === ""
-                ? null
-                : Number(builder.maxBacktrackDepth),
-          })),
+          builders: built.builders,
         }),
       });
 
@@ -340,6 +572,46 @@ export function BrickBuilderStudio() {
       );
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function handleBalanceRun() {
+    setBalanceError(null);
+    const built = buildSimulationBuildersPayload(builders);
+    if (!built.ok) {
+      setBalanceError(built.error);
+      return;
+    }
+    const seeds = balanceSeeds
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((value) => !Number.isNaN(value));
+    const effectiveSeeds = seeds.length > 0 ? seeds : [1, 2, 3];
+
+    setBalanceLoading(true);
+    setBalanceResult(null);
+    try {
+      const response = await fetch(`${DEFAULT_API_URL}/balance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          seeds: effectiveSeeds,
+          totalSteps: Number(balanceTotalSteps),
+          cubeCage: Number(balanceCubeCage),
+          builders: built.builders,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Balance request failed with status ${response.status}.`);
+      }
+      const payload = (await response.json()) as BalanceSummaryResponse;
+      setBalanceResult(payload);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Balance request failed.";
+      setBalanceError(`${message} Is the API running on ${DEFAULT_API_URL}?`);
+    } finally {
+      setBalanceLoading(false);
     }
   }
 
@@ -641,6 +913,75 @@ export function BrickBuilderStudio() {
                                 }
                               />
                             </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Archetype</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.archetype}
+                                onChange={(event) =>
+                                  updateBuilder(index, { archetype: event.target.value })
+                                }
+                              >
+                                {archetypeOptions.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Selection mode</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.selectionMode}
+                                onChange={(event) =>
+                                  updateBuilder(index, { selectionMode: event.target.value })
+                                }
+                              >
+                                {SELECTION_MODE_OPTIONS.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Symmetry</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.symmetryMode}
+                                onChange={(event) =>
+                                  updateBuilder(index, { symmetryMode: event.target.value })
+                                }
+                              >
+                                {symmetryOptions.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200 sm:col-span-2">
+                              <span className="block font-medium">Objective weights (JSON)</span>
+                              <textarea
+                                className="min-h-[88px] w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 font-mono text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                spellCheck={false}
+                                value={builder.objectiveWeightsJson}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    objectiveWeightsJson: event.target.value,
+                                  })
+                                }
+                              />
+                              <span className="block text-xs text-slate-500">
+                                Use catalog scoring category ids as keys, or {"{}"} for archetype
+                                defaults.
+                              </span>
+                            </label>
                           </div>
 
                           <div className="grid gap-3 sm:grid-cols-3">
@@ -669,6 +1010,95 @@ export function BrickBuilderStudio() {
                       </CollapsibleSection>
                     );
                   })}
+                </div>
+              </CollapsibleSection>
+
+              <CollapsibleSection
+                title="Balance matchups"
+                description="Multi-seed harness using the same builder configs as Generate (no SCAD export)."
+                summary={
+                  balanceResult ? (
+                    <span>{balanceResult.matchCount} seeds</span>
+                  ) : (
+                    <span>Harness idle</span>
+                  )
+                }
+              >
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="space-y-2 text-sm text-slate-200 sm:col-span-2">
+                      <span className="block font-medium">Seeds (comma-separated)</span>
+                      <input
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                        type="text"
+                        value={balanceSeeds}
+                        onChange={(event) => setBalanceSeeds(event.target.value)}
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm text-slate-200">
+                      <span className="block font-medium">Steps / run</span>
+                      <input
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                        min={1}
+                        max={2000}
+                        type="number"
+                        value={balanceTotalSteps}
+                        onChange={(event) => setBalanceTotalSteps(event.target.value)}
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm text-slate-200 sm:col-span-3">
+                      <span className="block font-medium">Cage</span>
+                      <input
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                        min={10}
+                        max={5000}
+                        type="number"
+                        value={balanceCubeCage}
+                        onChange={(event) => setBalanceCubeCage(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <button
+                    className="w-full rounded-full border border-emerald-300/40 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={balanceLoading}
+                    type="button"
+                    onClick={() => void handleBalanceRun()}
+                  >
+                    {balanceLoading ? "Running balance…" : "Run balance series"}
+                  </button>
+                  {balanceError ? (
+                    <p className="text-sm text-red-200">{balanceError}</p>
+                  ) : null}
+                  {balanceResult ? (
+                    <div className="space-y-3 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-slate-200">
+                      <div className="flex flex-wrap gap-3">
+                        <Metric label="Matches" value={balanceResult.matchCount} />
+                        <Metric
+                          label="Avg score gap"
+                          value={balanceResult.averageScoreGap}
+                        />
+                      </div>
+                      <div>
+                        <p className="text-[0.7rem] uppercase tracking-[0.2em] text-slate-400">
+                          Win rates
+                        </p>
+                        <ul className="mt-2 space-y-1 text-slate-300">
+                          {Object.entries(balanceResult.winRates).map(([id, rate]) => (
+                            <li key={id}>
+                              <span className="font-medium text-white">{id}</span>:{" "}
+                              {(rate * 100).toFixed(1)}%
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <JsonBlock emptyLabel="No per-seed rows." value={balanceResult.results} />
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">
+                      Calls POST /balance with the builders above. Requires an API that exposes the
+                      balance endpoint.
+                    </p>
+                  )}
                 </div>
               </CollapsibleSection>
             </form>
@@ -844,6 +1274,145 @@ export function BrickBuilderStudio() {
                     emptyLabel="Runtime state will appear here after the first successful run."
                     value={result?.builderStates}
                   />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="Timeline (recent ticks)"
+                  description="Per-tick snapshots from the simulation (newest first in the table)."
+                  summary={
+                    recentTimeline.length > 0 ? (
+                      <span>{recentTimeline.length} ticks shown</span>
+                    ) : (
+                      <span>No timeline</span>
+                    )
+                  }
+                >
+                  {recentTimeline.length > 0 ? (
+                    <div className="max-h-64 overflow-auto rounded-2xl border border-white/10">
+                      <table className="w-full min-w-[520px] border-collapse text-left text-xs text-slate-200">
+                        <thead className="sticky top-0 bg-black/80 text-[0.65rem] uppercase tracking-wider text-slate-400">
+                          <tr>
+                            <th className="border-b border-white/10 px-3 py-2">Tick</th>
+                            <th className="border-b border-white/10 px-3 py-2">Placements Δ</th>
+                            <th className="border-b border-white/10 px-3 py-2">Active</th>
+                            <th className="border-b border-white/10 px-3 py-2">Blocked</th>
+                            <th className="border-b border-white/10 px-3 py-2">Bricks</th>
+                            <th className="border-b border-white/10 px-3 py-2">Events</th>
+                            <th className="border-b border-white/10 px-3 py-2">Scores</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...recentTimeline].reverse().map((snap) => (
+                            <tr
+                              key={snap.tick}
+                              className="border-b border-white/5 odd:bg-black/20"
+                            >
+                              <td className="px-3 py-2 font-mono">{snap.tick}</td>
+                              <td className="px-3 py-2">
+                                {"placementsThisTick" in snap && snap.placementsThisTick != null
+                                  ? String(snap.placementsThisTick)
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {"activeBuilders" in snap && snap.activeBuilders != null
+                                  ? String(snap.activeBuilders)
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {"blockedBuilders" in snap && snap.blockedBuilders != null
+                                  ? String(snap.blockedBuilders)
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {snap.brickCount != null ? String(snap.brickCount) : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {snap.events?.length != null ? snap.events.length : "—"}
+                              </td>
+                              <td className="max-w-[200px] truncate px-3 py-2 text-slate-400">
+                                {snap.scoresByBuilder
+                                  ? Object.entries(snap.scoresByBuilder)
+                                      .map(([id, v]) => `${id}:${Number(v).toFixed(1)}`)
+                                      .join(" ")
+                                  : snap.builders
+                                      ?.map((b) => `${b.id}:${b.score ?? b.placementCount}`)
+                                      .join(" ") ?? "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-400">
+                      Run a simulation to populate the timeline. Older engines may use a different
+                      snapshot shape; raw data remains in the full JSON export.
+                    </p>
+                  )}
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="Placement telemetry"
+                  description="Recent placed events with score and support context (when provided by the engine)."
+                  summary={
+                    placementTelemetry.length > 0 ? (
+                      <span>{placementTelemetry.length} placements</span>
+                    ) : (
+                      <span>No placements</span>
+                    )
+                  }
+                >
+                  {placementTelemetry.length > 0 ? (
+                    <div className="max-h-72 overflow-auto rounded-2xl border border-white/10">
+                      <table className="w-full min-w-[720px] border-collapse text-left text-xs text-slate-200">
+                        <thead className="sticky top-0 bg-black/80 text-[0.65rem] uppercase tracking-wider text-slate-400">
+                          <tr>
+                            <th className="border-b border-white/10 px-2 py-2">Tick</th>
+                            <th className="border-b border-white/10 px-2 py-2">Builder</th>
+                            <th className="border-b border-white/10 px-2 py-2">Strategy</th>
+                            <th className="border-b border-white/10 px-2 py-2">Sel.</th>
+                            <th className="border-b border-white/10 px-2 py-2">Δ</th>
+                            <th className="border-b border-white/10 px-2 py-2">Run / total</th>
+                            <th className="border-b border-white/10 px-2 py-2">Breakdown</th>
+                            <th className="border-b border-white/10 px-2 py-2">Support</th>
+                            <th className="border-b border-white/10 px-2 py-2">Strategy Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {placementTelemetry.map((event, rowIndex) => (
+                            <tr
+                              key={`${event.tick}-${event.builderId}-${event.placementId}-${rowIndex}`}
+                              className="border-b border-white/5 odd:bg-black/20"
+                            >
+                              <td className="px-2 py-2 font-mono">{event.tick}</td>
+                              <td className="px-2 py-2">{event.builderId}</td>
+                              <td className="max-w-[120px] truncate px-2 py-2">{event.strategy}</td>
+                              <td className="px-2 py-2">{event.selectionMode ?? "—"}</td>
+                              <td className="px-2 py-2 font-mono">{telemetryDelta(event)}</td>
+                              <td className="px-2 py-2 font-mono">{telemetryRunning(event)}</td>
+                              <td className="max-w-[220px] truncate px-2 py-2 text-slate-400">
+                                {formatTelemetryScoreSummary(event)}
+                              </td>
+                              <td className="px-2 py-2 font-mono text-[0.65rem]">
+                                {telemetrySupport(event)}
+                              </td>
+                              <td className="max-w-[140px] truncate px-2 py-2 text-slate-400">
+                                {event.strategyBefore != null || event.strategyAfter != null
+                                  ? `${event.strategyBefore ?? "—"} → ${event.strategyAfter ?? "—"}`
+                                  : event.previousStrategy != null
+                                    ? String(event.previousStrategy)
+                                    : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-400">
+                      No placement trace events yet, or the run did not record scored placements.
+                    </p>
+                  )}
                 </CollapsibleSection>
 
                 <CollapsibleSection
