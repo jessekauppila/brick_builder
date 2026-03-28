@@ -9,6 +9,9 @@ from typing import Optional
 from .brick_agent import BrickAgent
 from .builder_agent import BuilderAgent, list_continuity_modes, list_failure_policies
 from .competition_profiles import (
+    default_buildability_profile,
+    default_objective_weights,
+    get_archetype_profile,
     list_archetypes,
     list_scoring_categories,
     list_strategy_shifts,
@@ -31,14 +34,14 @@ class BuilderConfig:
     color: str = "Red"
     shape_id: str = "bar_2x1"
     start_anchor: Vector3 = (0, 0, 0)
-    placement_rule_id: str = "alternating_sideways_vertical"
+    placement_rule_id: str = "competitive_growth"
     max_placements: int = DEFAULT_TOTAL_STEPS
     failure_policy: str = "backtrack"
     continuity_mode: str = "strict"
     max_backtrack_depth: Optional[int] = None
     archetype: str = "territorial"
     objective_weights: dict[str, float] = field(default_factory=dict)
-    allowed_strategy_shifts: list[str] = field(default_factory=list)
+    allowed_strategy_shifts: tuple[str, ...] = ()
     initial_strategy: str = ""
     buildability_profile: dict[str, int | bool] = field(default_factory=dict)
     symmetry_mode: str = "none"
@@ -56,10 +59,10 @@ class BuilderConfig:
             "continuityMode": self.continuity_mode,
             "maxBacktrackDepth": self.max_backtrack_depth,
             "archetype": self.archetype,
-            "objectiveWeights": dict(self.objective_weights),
+            "objectiveWeights": self.objective_weights,
             "allowedStrategyShifts": list(self.allowed_strategy_shifts),
             "initialStrategy": self.initial_strategy,
-            "buildabilityProfile": dict(self.buildability_profile),
+            "buildabilityProfile": self.buildability_profile,
             "symmetryMode": self.symmetry_mode,
             "selectionMode": self.selection_mode,
         }
@@ -84,8 +87,7 @@ class BrickModel:
         self.bricks: list[BrickAgent] = []
         self.next_brick_id = 0
         self.trace = []
-        # Stop 04 telemetry: timeline captures tick-by-tick simulation state.
-        self.timeline = []
+        self.timeline: list[dict[str, object]] = []
         self.builder_agents = [
             BuilderAgent(
                 config=config,
@@ -105,61 +107,29 @@ class BrickModel:
         for tick in range(self.total_steps):
             self.log(f"Tick {tick}")
             placements_this_tick = 0
-            active_builders_before = sum(
-                1 for builder_agent in self.builder_agents if builder_agent.status == "active"
-            )
-            actions = []
+            active_builders = 0
             for builder_agent in self.builder_agents:
-                placed, event = self._run_builder_step(builder_agent, tick)
-                if placed:
+                if builder_agent.status == "active":
+                    active_builders += 1
+                if self._run_builder_step(builder_agent, tick):
                     placements_this_tick += 1
-                if event:
-                    actions.append(
-                        {
-                            "builderId": event["builderId"],
-                            "action": event["action"],
-                            "strategy": event.get("strategy"),
-                        }
-                    )
-
-            # Stop 04 baseline snapshot: lightweight per-tick state for post-run analysis.
-            self.timeline.append(
-                {
-                    "tick": tick,
-                    "placementsThisTick": placements_this_tick,
-                    "activeBuilders": sum(
-                        1
-                        for builder_agent in self.builder_agents
-                        if builder_agent.status == "active"
-                    ),
-                    "blockedBuilders": sum(
-                        1
-                        for builder_agent in self.builder_agents
-                        if builder_agent.status == "blocked"
-                    ),
-                    "scoresByBuilder": {
-                        builder_agent.config.id: round(builder_agent.score, 3)
-                        for builder_agent in self.builder_agents
-                    },
-                    "actions": actions,
-                }
-            )
-            if active_builders_before == 0 and placements_this_tick == 0:
+            self.timeline.append(self._build_tick_snapshot(tick))
+            if active_builders == 0 and placements_this_tick == 0:
                 self.log("No active builders remain; ending run early.")
                 break
         return self
 
     def _run_builder_step(self, builder_agent: BuilderAgent, tick: int):
+        prior_event_count = len(builder_agent.trace)
         result = builder_agent.step(self.world, tick)
-        latest_event_dict = None
-        if builder_agent.trace:
-            latest_event = builder_agent.trace[-1]
-            latest_event_dict = latest_event.to_dict()
-            self.trace.append(latest_event_dict)
-            self.log(latest_event.message)
+        if len(builder_agent.trace) > prior_event_count:
+            new_events = builder_agent.trace[prior_event_count:]
+            for event in new_events:
+                self.trace.append(event.to_dict())
+                self.log(event.message)
 
         if not result.placed:
-            return False, latest_event_dict
+            return False
 
         for brick_x, brick_y, brick_z in result.cells:
             self.bricks.append(
@@ -174,10 +144,13 @@ class BrickModel:
                     shape_id=builder_agent.config.shape_id,
                     placement_id=result.placement_id,
                     tick=tick,
+                    supported=result.supported,
+                    strategy=result.strategy,
+                    score=result.score_total,
                 )
             )
             self.next_brick_id += 1
-        return True, latest_event_dict
+        return True
 
     def _normalize_builders(self, builders):
         normalized = builders or default_builder_configs(self.brick_unit)
@@ -198,7 +171,7 @@ class BrickModel:
                     placement_rule_id=builder.get(
                         "placement_rule_id",
                         builder.get(
-                            "placementRuleId", "alternating_sideways_vertical"
+                            "placementRuleId", "competitive_growth"
                         ),
                     ),
                     max_placements=builder.get(
@@ -219,43 +192,49 @@ class BrickModel:
                     ),
                     archetype=builder.get("archetype", "territorial"),
                     objective_weights=dict(
-                        builder.get(
-                            "objective_weights", builder.get("objectiveWeights", {})
-                        )
-                        or {}
+                        builder.get("objective_weights", builder.get("objectiveWeights", {}))
                     ),
-                    allowed_strategy_shifts=list(
+                    allowed_strategy_shifts=tuple(
                         builder.get(
                             "allowed_strategy_shifts",
-                            builder.get("allowedStrategyShifts", []),
+                            builder.get("allowedStrategyShifts", ()),
                         )
-                        or []
                     ),
                     initial_strategy=builder.get(
                         "initial_strategy",
                         builder.get("initialStrategy", ""),
-                    )
-                    or "",
+                    ),
                     buildability_profile=dict(
                         builder.get(
-                            "buildability_profile", builder.get("buildabilityProfile", {})
+                            "buildability_profile",
+                            builder.get("buildabilityProfile", {}),
                         )
-                        or {}
                     ),
                     symmetry_mode=builder.get(
-                        "symmetry_mode", builder.get("symmetryMode", "none")
-                    )
-                    or "none",
+                        "symmetry_mode",
+                        builder.get("symmetryMode", "none"),
+                    ),
                     selection_mode=builder.get(
-                        "selection_mode", builder.get("selectionMode", "legacy")
-                    )
-                    or "legacy",
+                        "selection_mode",
+                        builder.get("selectionMode", "legacy"),
+                    ),
                 )
 
             if config.id in seen_ids:
                 raise ValueError(f"Duplicate builder id '{config.id}'.")
 
             get_shape(config.shape_id)
+            profile = get_archetype_profile(config.archetype)
+            merged_weights = default_objective_weights(config.archetype)
+            merged_weights.update(config.objective_weights)
+            merged_buildability = default_buildability_profile(config.archetype)
+            merged_buildability.update(config.buildability_profile)
+            allowed_strategy_shifts = tuple(
+                config.allowed_strategy_shifts or profile.allowed_strategy_shifts
+            )
+            initial_strategy = config.initial_strategy or profile.initial_strategy
+            symmetry_mode = config.symmetry_mode or profile.symmetry_mode
+
             if len(config.start_anchor) != 3:
                 raise ValueError(
                     f"Builder '{config.id}' must define a 3-value start_anchor."
@@ -283,13 +262,47 @@ class BrickModel:
                 raise ValueError(
                     f"Builder '{config.id}' must define max_backtrack_depth >= 1."
                 )
-            if config.selection_mode not in {"legacy", "competitive"}:
+            unknown_strategy_ids = set(allowed_strategy_shifts) - {
+                option["id"] for option in list_strategy_shifts()
+            }
+            if unknown_strategy_ids:
                 raise ValueError(
-                    f"Builder '{config.id}' has unknown selection_mode "
-                    f"'{config.selection_mode}'."
+                    f"Builder '{config.id}' has unknown strategy shifts "
+                    f"{sorted(unknown_strategy_ids)}."
+                )
+            if initial_strategy not in allowed_strategy_shifts:
+                raise ValueError(
+                    f"Builder '{config.id}' initial_strategy '{initial_strategy}' must "
+                    "be present in allowed_strategy_shifts."
+                )
+            if symmetry_mode not in {
+                option["id"] for option in list_symmetry_modes()
+            }:
+                raise ValueError(
+                    f"Builder '{config.id}' has unknown symmetry_mode "
+                    f"'{symmetry_mode}'."
                 )
 
-            builder_configs.append(config)
+            builder_configs.append(
+                BuilderConfig(
+                    id=config.id,
+                    color=config.color,
+                    shape_id=config.shape_id,
+                    start_anchor=config.start_anchor,
+                    placement_rule_id=config.placement_rule_id,
+                    max_placements=config.max_placements,
+                    failure_policy=config.failure_policy,
+                    continuity_mode=config.continuity_mode,
+                    max_backtrack_depth=config.max_backtrack_depth,
+                    archetype=config.archetype,
+                    objective_weights=merged_weights,
+                    allowed_strategy_shifts=allowed_strategy_shifts,
+                    initial_strategy=initial_strategy,
+                    buildability_profile=merged_buildability,
+                    symmetry_mode=symmetry_mode,
+                    selection_mode=config.selection_mode,
+                )
+            )
             seen_ids.add(config.id)
 
         if not builder_configs:
@@ -335,28 +348,88 @@ class BrickModel:
             },
         }
 
+    def _build_tick_snapshot(self, tick: int) -> dict[str, object]:
+        events = [event for event in self.trace if event["tick"] == tick]
+        return {
+            "tick": tick,
+            "brickCount": len(self.bricks),
+            "placementCount": sum(
+                builder_agent.placement_count for builder_agent in self.builder_agents
+            ),
+            "builders": self.get_builder_states(),
+            "events": events,
+        }
+
 
 def default_builder_configs(brick_unit=10):
+    fortress = get_archetype_profile("fortress")
+    vine = get_archetype_profile("vine")
+    coral = get_archetype_profile("coral")
+    territorial = get_archetype_profile("territorial")
     return [
         BuilderConfig(
-            id="red",
-            color="Red",
+            id="fortress-red",
+            color="#ef4444",
             shape_id="bar_2x1",
             start_anchor=(0, 0, 0),
-            placement_rule_id="alternating_sideways_vertical",
+            placement_rule_id="competitive_growth",
             max_placements=DEFAULT_TOTAL_STEPS,
             failure_policy="backtrack",
             continuity_mode="strict",
+            archetype="fortress",
+            objective_weights=default_objective_weights("fortress"),
+            allowed_strategy_shifts=fortress.allowed_strategy_shifts,
+            initial_strategy=fortress.initial_strategy,
+            buildability_profile=default_buildability_profile("fortress"),
+            symmetry_mode=fortress.symmetry_mode,
         ),
         BuilderConfig(
-            id="blue",
-            color="Blue",
+            id="vine-blue",
+            color="#38bdf8",
             shape_id="bar_2x1",
             start_anchor=(brick_unit * 4, 0, 0),
-            placement_rule_id="alternating_sideways_vertical",
+            placement_rule_id="competitive_growth",
             max_placements=DEFAULT_TOTAL_STEPS,
             failure_policy="backtrack",
             continuity_mode="strict",
+            archetype="vine",
+            objective_weights=default_objective_weights("vine"),
+            allowed_strategy_shifts=vine.allowed_strategy_shifts,
+            initial_strategy=vine.initial_strategy,
+            buildability_profile=default_buildability_profile("vine"),
+            symmetry_mode=vine.symmetry_mode,
+        ),
+        BuilderConfig(
+            id="coral-green",
+            color="#22c55e",
+            shape_id="bar_3x1",
+            start_anchor=(0, brick_unit * 4, 0),
+            placement_rule_id="competitive_growth",
+            max_placements=DEFAULT_TOTAL_STEPS,
+            failure_policy="backtrack",
+            continuity_mode="strict",
+            archetype="coral",
+            objective_weights=default_objective_weights("coral"),
+            allowed_strategy_shifts=coral.allowed_strategy_shifts,
+            initial_strategy=coral.initial_strategy,
+            buildability_profile=default_buildability_profile("coral"),
+            symmetry_mode=coral.symmetry_mode,
+        ),
+        BuilderConfig(
+            id="territorial-gold",
+            color="#f59e0b",
+            shape_id="single_1x1",
+            start_anchor=(brick_unit * 4, brick_unit * 4, 0),
+            placement_rule_id="competitive_growth",
+            max_placements=DEFAULT_TOTAL_STEPS,
+            failure_policy="backtrack",
+            continuity_mode="strict",
+            archetype="territorial",
+            objective_weights=default_objective_weights("territorial"),
+            allowed_strategy_shifts=territorial.allowed_strategy_shifts,
+            initial_strategy=territorial.initial_strategy,
+            buildability_profile=default_buildability_profile("territorial"),
+            symmetry_mode=territorial.symmetry_mode,
         ),
     ]
 
@@ -396,7 +469,13 @@ def run_simulation(
     model.run()
 
     simulation = model.to_dict()
-    simulation["scad"] = ""
+    scad_source = ""
+    if scad_output_path:
+        from .scad_export import build_scad, write_scad
+
+        scad_source = str(build_scad(model.get_bricks()))
+        write_scad(model.get_bricks(), scad_output_path)
+    simulation["scad"] = scad_source
     simulation["metadata"]["seed"] = seed
     simulation["metadata"]["outputPath"] = (
         str(scad_output_path) if scad_output_path else None
@@ -404,13 +483,6 @@ def run_simulation(
     simulation["metadata"]["jsonOutputPath"] = (
         str(json_output_path) if json_output_path else None
     )
-
-    if scad_output_path:
-        from .scad_export import build_scad, write_scad
-
-        scad_source = str(build_scad(model.get_bricks()))
-        simulation["scad"] = scad_source
-        write_scad(model.get_bricks(), scad_output_path)
 
     if json_output_path:
         write_json(simulation, json_output_path)

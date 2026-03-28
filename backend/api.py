@@ -23,6 +23,7 @@ try:
         run_simulation,
     )
     from .simulation.placement_rules import list_placement_rules
+    from .simulation.balance_harness import run_matchup_series, summarize_matchup_series
     from .simulation.shapes import list_shapes
 except ImportError:
     from simulation.builder_agent import list_continuity_modes, list_failure_policies
@@ -39,6 +40,7 @@ except ImportError:
         run_simulation,
     )
     from simulation.placement_rules import list_placement_rules
+    from simulation.balance_harness import run_matchup_series, summarize_matchup_series
     from simulation.shapes import list_shapes
 
 DEFAULT_EXPORT_STEM = "sample"
@@ -63,12 +65,19 @@ class BuildabilityProfileRequest(BaseModel):
 
 
 class GenerateRequest(BaseModel):
+    class BuildabilityProfileRequest(BaseModel):
+        maxCantilever: Optional[int] = Field(default=None, ge=0, le=20)
+        maxUnsupportedHeight: Optional[int] = Field(default=None, ge=0, le=20)
+        requireSupportPath: Optional[bool] = None
+        allowPillarDrop: Optional[bool] = None
+        requireHostContact: Optional[bool] = None
+
     class BuilderRequest(BaseModel):
         id: str = Field(min_length=1, max_length=50)
         color: str = Field(default="Red", min_length=1, max_length=50)
         shapeId: str = "bar_2x1"
         startAnchor: tuple[int, int, int] = (0, 0, 0)
-        placementRuleId: str = "alternating_sideways_vertical"
+        placementRuleId: str = "competitive_growth"
         maxPlacements: int = Field(default=200, ge=0, le=2000)
         failurePolicy: str = "backtrack"
         continuityMode: str = "strict"
@@ -90,6 +99,36 @@ class GenerateRequest(BaseModel):
     saveJson: bool = True
     fileName: str = "sample.scad"
     builders: Optional[list[BuilderRequest]] = None
+
+
+class BalanceRequest(BaseModel):
+    seeds: list[int] = Field(default_factory=lambda: [1, 2, 3])
+    totalSteps: int = Field(default=120, ge=1, le=2000)
+    cubeCage: int = Field(default=160, ge=10, le=5000)
+    builders: Optional[list[GenerateRequest.BuilderRequest]] = None
+
+
+def builder_request_to_sim_payload(
+    builder: GenerateRequest.BuilderRequest,
+) -> dict[str, object]:
+    return {
+        "id": builder.id,
+        "color": builder.color,
+        "shapeId": builder.shapeId,
+        "startAnchor": builder.startAnchor,
+        "placementRuleId": builder.placementRuleId,
+        "maxPlacements": builder.maxPlacements,
+        "failurePolicy": builder.failurePolicy,
+        "continuityMode": builder.continuityMode,
+        "maxBacktrackDepth": builder.maxBacktrackDepth,
+        "archetype": builder.archetype,
+        "objectiveWeights": builder.objectiveWeights,
+        "allowedStrategyShifts": builder.allowedStrategyShifts,
+        "initialStrategy": builder.initialStrategy,
+        "buildabilityProfile": builder.buildabilityProfile.model_dump(exclude_none=True),
+        "symmetryMode": builder.symmetryMode,
+        "selectionMode": builder.selectionMode,
+    }
 
 
 def resolve_output_path(file_name: str, extension: str) -> Path:
@@ -138,27 +177,7 @@ def generate_model(payload: GenerateRequest, request: Request):
         json_output_path=json_output_path,
         seed=payload.seed,
         builders=[
-            {
-                "id": builder.id,
-                "color": builder.color,
-                "shapeId": builder.shapeId,
-                "startAnchor": builder.startAnchor,
-                "placementRuleId": builder.placementRuleId,
-                "maxPlacements": builder.maxPlacements,
-                "failurePolicy": builder.failurePolicy,
-                "continuityMode": builder.continuityMode,
-                "maxBacktrackDepth": builder.maxBacktrackDepth,
-                "archetype": builder.archetype,
-                "objectiveWeights": builder.objectiveWeights,
-                "allowedStrategyShifts": builder.allowedStrategyShifts,
-                "initialStrategy": builder.initialStrategy,
-                "buildabilityProfile": builder.buildabilityProfile.model_dump(
-                    exclude_none=True
-                ),
-                "symmetryMode": builder.symmetryMode,
-                "selectionMode": builder.selectionMode,
-            }
-            for builder in payload.builders
+            builder_request_to_sim_payload(builder) for builder in payload.builders
         ]
         if payload.builders is not None
         else None,
@@ -169,6 +188,22 @@ def generate_model(payload: GenerateRequest, request: Request):
     simulation["downloadUrl"] = build_download_url(request, scad_file_name)
     simulation["jsonDownloadUrl"] = build_download_url(request, json_file_name)
     return simulation
+
+
+@app.post("/balance")
+def run_balance(payload: BalanceRequest):
+    builders_payload = (
+        [builder_request_to_sim_payload(b) for b in payload.builders]
+        if payload.builders is not None
+        else [builder.to_dict() for builder in default_builder_configs()]
+    )
+    results = run_matchup_series(
+        builder_configs=builders_payload,
+        seeds=payload.seeds,
+        total_steps=payload.totalSteps,
+        cube_cage=payload.cubeCage,
+    )
+    return summarize_matchup_series(results)
 
 
 @app.get("/exports/{file_name}")

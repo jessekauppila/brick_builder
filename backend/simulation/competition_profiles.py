@@ -197,3 +197,11 @@ def list_scoring_categories() -> list[dict[str, str]]:
         {"id": category_id, "label": label}
         for category_id, label in sorted(SCORING_CATEGORIES.items())
     ]
+
+
+def default_objective_weights(archetype_id: str) -> dict[str, float]:
+    return dict(get_archetype_profile(archetype_id).default_objective_weights)
+
+
+def default_buildability_profile(archetype_id: str) -> dict[str, int | bool]:
+    return get_archetype_profile(archetype_id).buildability_profile.to_dict()
