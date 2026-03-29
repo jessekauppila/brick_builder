@@ -3,3 +3,8 @@ Loupe-UX/**
 .next/**
 node_modules/**
 backend/exports/**
+
+# Local-only folder: still ignored by Git via root .gitignore,
+# but allow @ mentions / indexing in Cursor.
+!atp-backend-main/
+!atp-backend-main/**
