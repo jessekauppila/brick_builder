@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import combinations
 
 from .brick_model import BuilderConfig, run_simulation
 
@@ -94,8 +93,3 @@ def summarize_matchup_series(results: list[MatchupResult]) -> dict[str, object]:
         "results": [result.to_dict() for result in results],
     }
 
-
-def build_round_robin_pairs(
-    builder_configs: list[BuilderConfig],
-) -> list[tuple[BuilderConfig, BuilderConfig]]:
-    return list(combinations(builder_configs, 2))

@@ -1,0 +1,66 @@
+---
+description: Brick Builder Studio shell layout, region names, information architecture, and HMI primitives
+globs: components/**/*.tsx,app/**/*.tsx
+alwaysApply: false
+---
+
+# Brick Builder Studio — design system
+
+## Region names (vocabulary)
+
+Use these names consistently in UI copy, code comments, and docs:
+
+| Name | Role | CSS / markup |
+|------|------|----------------|
+| **Run & export** | Full-width bar at the top: run status, **Generate model**, and **Generation Settings** (steps, seed, cage, export file, SCAD checkbox). | `.studio-shell-top` inside `#studio-generate` |
+| **Builders rail** | Left column: **Builder Rule Sets** + **Balance matchups**. Sticky on wide viewports. | `.studio-builders-rail` + `.studio-side-rail` |
+| **Preview workspace** | Center column: **Brick Builder Studio** eyebrow, **Rule-driven generator workspace**, viewer filter, **BrickPreviewCanvas**, helper blurb. Gets **twice** the horizontal track of each rail (`2fr` vs `1fr`). | `.studio-center` / `.studio-preview-workspace` |
+| **Diagnostics rail** | Right column: **Run Diagnostics** tree only. Sticky on wide viewports. | `.studio-diagnostics-rail` + `.studio-side-rail` |
+
+Deprecated term: **Control Rail** — replaced by **Run & export** for the top panel (it is not only “control”; it includes export-related fields).
+
+## Layout contract
+
+- **Shell**: [`BrickBuilderStudio`](components/BrickBuilderStudio.tsx) uses `.studio-shell` on `<main>` (see [`globals.css`](app/globals.css)).
+- **Form**: `<form id="studio-generate">` wraps (1) the **Run & export** panel and (2) the `.studio-shell-body` grid so generation fields, builder inputs, and the submit button stay associated without scattered `form=""` attributes on inputs.
+- **Body grid** (≥1024px): **1fr — 2fr — 1fr** → Preview workspace is **two times** the width of the Builders rail and the Diagnostics rail (each outer column gets one share; center gets two).
+- **Responsive**: Below ~1024px, `.studio-shell-body` is a single column with **order**: Preview workspace → Diagnostics rail → Builders rail. The **Run & export** block stays first (above the grid). Below ~700px, side rails lose sticky scrolling.
+
+## Information architecture (copy)
+
+| Region | Title | Description (guidance) |
+|--------|--------|-------------------------|
+| Run & export | Run & export | Status, generate, and high-level simulation parameters; where **Generation Settings** lives. |
+| Generation Settings | Generation Settings | High-level run controls for the shared simulation (summary chips: steps + cage). |
+| Builder Rule Sets | Builder Rule Sets | Each builder runs against the same occupied grid; collapsing each card keeps the rail readable. |
+| Balance matchups | Balance matchups | Multi-seed harness using the same builder configs as Generate (no SCAD export). Idle: “Harness idle”; after run, seed/match summary. |
+| Preview workspace | Rule-driven generator workspace | Eyebrow **Brick Builder Studio**. Preview shows committed cubes; filter by builder; point users to Run Diagnostics for metrics/traces. |
+| Run Diagnostics | Run Diagnostics | Output and runtime details; collapsibles on demand. |
+
+**Run Diagnostics** children (collapsible):
+
+- **Run Summary** — API target, result metrics, export actions.
+- **Builder Configs Used** — Serialized builder inputs for the latest generation request.
+- **Builder Runtime State** — Per-builder runtime details from the simulation.
+- **Timeline (recent ticks)** — Per-tick snapshots (newest first in table).
+- **Placement telemetry** — Recent placed events with score and support context when the engine provides them.
+- **Recent Trace Events** — Last trace events, newest first.
+- **Export Paths And Raw Response** — Paths and full API payload for the latest run.
+
+**Balance** idle note: harness calls `POST /balance` with the builders above; requires an API that exposes the balance endpoint.
+
+## Primary actions
+
+- **Generate model**: submits `#studio-generate` → `POST /generate`. Optional OpenSCAD save; copy references `backend/exports/`.
+- **Run balance series**: `type="button"` → `POST /balance`; not part of form submit.
+
+## Visual primitives
+
+Reuse [`StudioPrimitives`](components/hmi/StudioPrimitives.tsx): `StudioPanel` (`.loupe-panel`), `PanelHeader`, `CollapsibleSection`, `Metric`, `JsonBlock`, `StatusLight` (`.loupe-led*`).
+
+Keep the studio page chrome: radial gradient root, sky primary CTA, emerald balance actions, zinc/slate text, rounded-2xl fields.
+
+## Implementation notes
+
+- **Submit** lives in **Run & export** inside the same `<form>` as builder fields and generation inputs.
+- Builder inputs and generation fields are descendants of `#studio-generate`; balance controls remain `type="button"`.

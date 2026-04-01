@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BrickPreviewCanvas, type BrickRecord } from "@/components/BrickPreviewCanvas";
 import {
@@ -49,12 +49,22 @@ type CatalogDefaultBuilder = {
   objectiveWeights?: Record<string, number>;
 };
 
+type ArchetypeProfileData = {
+  id: string;
+  label: string;
+  defaultObjectiveWeights: Record<string, number>;
+  allowedStrategyShifts: string[];
+  initialStrategy: string;
+  buildabilityProfile: Record<string, number | boolean>;
+  symmetryMode: string;
+};
+
 type CatalogResponse = {
   shapes: CatalogOption[];
   placementRules: CatalogOption[];
   failurePolicies: CatalogOption[];
   continuityModes: CatalogOption[];
-  archetypes?: CatalogOption[];
+  archetypes?: ArchetypeProfileData[];
   symmetryModes?: CatalogOption[];
   scoringCategories?: CatalogOption[];
   defaultBuilders: CatalogDefaultBuilder[];
@@ -99,16 +109,6 @@ type TraceEvent = {
   strategyAfter?: string | null;
   supportPathExists?: boolean | null;
   supported?: boolean | null;
-  previousStrategy?: string | null;
-  strategyChanged?: boolean | null;
-  selectionMode?: string | null;
-  selectedCandidate?: unknown;
-  score?: {
-    total?: number;
-    deltaVsNextBest?: number;
-    categoryBreakdown?: Record<string, number>;
-  } | null;
-  markers?: { support?: boolean; choke?: boolean } | null;
 };
 
 type TimelineSnapshot = {
@@ -200,37 +200,37 @@ const DEFAULT_CATALOG: CatalogResponse = {
     { id: "fallback_random", label: "Fallback To Random Placement" },
   ],
   continuityModes: [{ id: "strict", label: "Strict Continuity" }],
-  archetypes: [{ id: "territorial", label: "Territorial" }],
+  archetypes: [{ id: "territorial", label: "Territorial", defaultObjectiveWeights: {}, allowedStrategyShifts: [], initialStrategy: "expand", buildabilityProfile: {}, symmetryMode: "none" }],
   symmetryModes: [{ id: "none", label: "None" }],
   scoringCategories: [],
   defaultBuilders: [
     {
-      id: "red",
-      color: "Red",
+      id: "fortress-red",
+      color: "#ef4444",
       shapeId: "bar_2x1",
       startAnchor: [0, 0, 0],
-      placementRuleId: "alternating_sideways_vertical",
+      placementRuleId: "competitive_growth",
       maxPlacements: 200,
       failurePolicy: "backtrack",
       continuityMode: "strict",
       maxBacktrackDepth: 200,
-      archetype: "territorial",
-      selectionMode: "legacy",
-      symmetryMode: "none",
+      archetype: "fortress",
+      selectionMode: "competitive",
+      symmetryMode: "mirror_x",
       objectiveWeights: {},
     },
     {
-      id: "blue",
-      color: "Blue",
+      id: "vine-blue",
+      color: "#38bdf8",
       shapeId: "bar_2x1",
       startAnchor: [40, 0, 0],
-      placementRuleId: "alternating_sideways_vertical",
+      placementRuleId: "competitive_growth",
       maxPlacements: 200,
       failurePolicy: "backtrack",
       continuityMode: "strict",
       maxBacktrackDepth: 200,
-      archetype: "territorial",
-      selectionMode: "legacy",
+      archetype: "vine",
+      selectionMode: "competitive",
       symmetryMode: "none",
       objectiveWeights: {},
     },
@@ -336,18 +336,6 @@ function buildSimulationBuildersPayload(builders: BuilderInput[]) {
 }
 
 function formatTelemetryScoreSummary(event: TraceEvent): string {
-  if (event.score && typeof event.score === "object") {
-    const breakdown = event.score.categoryBreakdown;
-    if (breakdown && Object.keys(breakdown).length > 0) {
-      return Object.entries(breakdown)
-        .slice(0, 5)
-        .map(([key, value]) => `${key}:${Number(value).toFixed(2)}`)
-        .join(" ");
-    }
-    if (event.score.total != null) {
-      return `total ${Number(event.score.total).toFixed(3)}`;
-    }
-  }
   if (event.scores && event.scores.length > 0) {
     return event.scores
       .slice(0, 5)
@@ -358,9 +346,6 @@ function formatTelemetryScoreSummary(event: TraceEvent): string {
 }
 
 function telemetryDelta(event: TraceEvent): string {
-  if (event.score?.deltaVsNextBest != null) {
-    return Number(event.score.deltaVsNextBest).toFixed(3);
-  }
   if (event.scoreDelta != null) {
     return Number(event.scoreDelta).toFixed(3);
   }
@@ -368,9 +353,6 @@ function telemetryDelta(event: TraceEvent): string {
 }
 
 function telemetryRunning(event: TraceEvent): string {
-  if (event.score?.total != null) {
-    return Number(event.score.total).toFixed(3);
-  }
   if (event.runningScore != null) {
     return Number(event.runningScore).toFixed(3);
   }
@@ -378,9 +360,6 @@ function telemetryRunning(event: TraceEvent): string {
 }
 
 function telemetrySupport(event: TraceEvent): string {
-  if (event.markers) {
-    return `s:${event.markers.support ? "Y" : "N"} c:${event.markers.choke ? "Y" : "N"}`;
-  }
   const parts: string[] = [];
   if (event.supported != null) {
     parts.push(`sup:${event.supported ? "Y" : "N"}`);
@@ -411,6 +390,10 @@ export function BrickBuilderStudio() {
   const [balanceResult, setBalanceResult] = useState<BalanceSummaryResponse | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+
+  const [currentTick, setCurrentTick] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -466,6 +449,11 @@ export function BrickBuilderStudio() {
     }
   }, [result]);
 
+  const maxTick = useMemo(() => {
+    if (!result?.timeline || result.timeline.length === 0) return 0;
+    return Math.max(...result.timeline.map((t) => t.tick));
+  }, [result]);
+
   const filteredBricks = useMemo(() => {
     if (!result) {
       return [];
@@ -478,10 +466,64 @@ export function BrickBuilderStudio() {
     );
   }, [result, selectedBuilderFilter]);
 
+  const tickFilteredBricks = useMemo(() => {
+    if (currentTick === null) return filteredBricks;
+    return filteredBricks.filter((b) => b.tick !== null && b.tick !== undefined && b.tick <= currentTick);
+  }, [filteredBricks, currentTick]);
+
+  const currentTickSnapshot = useMemo(() => {
+    if (currentTick === null || !result?.timeline) return null;
+    return result.timeline.find((t) => t.tick === currentTick) ?? null;
+  }, [result, currentTick]);
+
+  const stopPlayback = useCallback(() => {
+    setIsPlaying(false);
+    if (playIntervalRef.current) {
+      clearInterval(playIntervalRef.current);
+      playIntervalRef.current = null;
+    }
+  }, []);
+
+  const startPlayback = useCallback(() => {
+    if (!result?.timeline || result.timeline.length === 0) return;
+    setIsPlaying(true);
+    const start = currentTick ?? 0;
+    let tick = start;
+    playIntervalRef.current = setInterval(() => {
+      tick += 1;
+      if (tick > maxTick) {
+        stopPlayback();
+        return;
+      }
+      setCurrentTick(tick);
+    }, 150);
+  }, [result, currentTick, maxTick, stopPlayback]);
+
+  useEffect(() => {
+    return () => {
+      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (result) {
+      setCurrentTick(null);
+      stopPlayback();
+    }
+  }, [result, stopPlayback]);
+
   const recentTrace = useMemo(
     () => result?.trace.slice(-20).reverse() ?? [],
     [result],
   );
+
+  const archetypeProfiles = useMemo(() => {
+    const map: Record<string, ArchetypeProfileData> = {};
+    if (catalog.archetypes) {
+      for (const a of catalog.archetypes) map[a.id] = a;
+    }
+    return map;
+  }, [catalog.archetypes]);
 
   const archetypeOptions = useMemo(
     () =>
@@ -617,13 +659,30 @@ export function BrickBuilderStudio() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#1d4ed8_0%,#0f172a_35%,#020617_100%)] text-zinc-50">
-      <main className="studio-workspace mx-auto min-h-screen w-full max-w-[1500px] px-4 py-4 sm:px-6 lg:px-8">
-        <StudioPanel className="studio-control-rail p-4">
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              <PanelHeader
-                title="Control Rail"
-                description="Builder settings stay on the left so the preview workspace remains visible while you tune the run."
-                actions={
+      <main className="studio-shell mx-auto min-h-screen w-full max-w-[1920px] px-4 py-4 sm:px-6 lg:px-8">
+        <form
+          className="flex min-w-0 flex-col gap-5"
+          id="studio-generate"
+          onSubmit={handleSubmit}
+        >
+          <StudioPanel className="studio-shell-top space-y-4 p-4">
+            <PanelHeader
+              title="Run & export"
+              description="Status, generate, and high-level simulation parameters. Builder rule sets and balance sit in the Builders rail to the left; Run Diagnostics sits on the right. The Preview workspace in the center is twice as wide as each rail so the 3D view stays primary."
+              actions={
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    <StatusLight
+                      label={isLoading ? "Generating" : result ? "Ready" : "Idle"}
+                      tone={generationTone}
+                    />
+                    <StatusLight label="Builders" tone="info" value={builders.length} />
+                    <StatusLight label="Visible cubes" tone="info" value={tickFilteredBricks.length} />
+                    <StatusLight
+                      label={downloadUrl || jsonDownloadUrl ? "Exports saved" : "Exports pending"}
+                      tone={exportTone}
+                    />
+                  </div>
                   <button
                     className="rounded-full bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:bg-sky-400/50"
                     disabled={isLoading}
@@ -631,84 +690,85 @@ export function BrickBuilderStudio() {
                   >
                     {isLoading ? "Generating..." : "Generate model"}
                   </button>
-                }
-              />
-
-              <CollapsibleSection
-                title="Generation Settings"
-                description="High-level run controls for the shared simulation."
-                defaultOpen
-                summary={
-                  <>
-                    <span>{totalSteps} steps</span>
-                    <span>{cubeCage} cage</span>
-                  </>
-                }
-              >
-                <div className="grid gap-3">
-                  <label className="space-y-2 text-sm text-slate-200" htmlFor="totalSteps">
-                    <span className="block font-medium">Total steps</span>
-                    <input
-                      id="totalSteps"
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                      min="1"
-                      max="2000"
-                      type="number"
-                      value={totalSteps}
-                      onChange={(event) => setTotalSteps(event.target.value)}
-                    />
-                  </label>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="space-y-2 text-sm text-slate-200" htmlFor="seed">
-                      <span className="block font-medium">Seed</span>
-                      <input
-                        id="seed"
-                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                        placeholder="Optional"
-                        type="number"
-                        value={seed}
-                        onChange={(event) => setSeed(event.target.value)}
-                      />
-                    </label>
-
-                    <label className="space-y-2 text-sm text-slate-200" htmlFor="cubeCage">
-                      <span className="block font-medium">Cage size</span>
-                      <input
-                        id="cubeCage"
-                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                        min="10"
-                        max="5000"
-                        type="number"
-                        value={cubeCage}
-                        onChange={(event) => setCubeCage(event.target.value)}
-                      />
-                    </label>
-                  </div>
-
-                  <label className="space-y-2 text-sm text-slate-200" htmlFor="fileName">
-                    <span className="block font-medium">Export file name</span>
-                    <input
-                      id="fileName"
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                      type="text"
-                      value={fileName}
-                      onChange={(event) => setFileName(event.target.value)}
-                    />
-                  </label>
-
-                  <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200">
-                    <input
-                      checked={saveScad}
-                      className="h-4 w-4 accent-sky-400"
-                      type="checkbox"
-                      onChange={(event) => setSaveScad(event.target.checked)}
-                    />
-                    Save an OpenSCAD export in `backend/exports/`
-                  </label>
                 </div>
-              </CollapsibleSection>
+              }
+            />
+            <CollapsibleSection
+              title="Generation Settings"
+              description="High-level run controls for the shared simulation."
+              defaultOpen
+              summary={
+                <>
+                  <span>{totalSteps} steps</span>
+                  <span>{cubeCage} cage</span>
+                </>
+              }
+            >
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <label className="space-y-2 text-sm text-slate-200" htmlFor="totalSteps">
+                  <span className="block font-medium">Total steps</span>
+                  <input
+                    id="totalSteps"
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                    min="1"
+                    max="2000"
+                    type="number"
+                    value={totalSteps}
+                    onChange={(event) => setTotalSteps(event.target.value)}
+                  />
+                </label>
 
+                <label className="space-y-2 text-sm text-slate-200" htmlFor="seed">
+                  <span className="block font-medium">Seed</span>
+                  <input
+                    id="seed"
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                    placeholder="Optional"
+                    type="number"
+                    value={seed}
+                    onChange={(event) => setSeed(event.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-2 text-sm text-slate-200" htmlFor="cubeCage">
+                  <span className="block font-medium">Cage size</span>
+                  <input
+                    id="cubeCage"
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                    min="10"
+                    max="5000"
+                    type="number"
+                    value={cubeCage}
+                    onChange={(event) => setCubeCage(event.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-2 text-sm text-slate-200 sm:col-span-2 xl:col-span-1" htmlFor="fileName">
+                  <span className="block font-medium">Export file name</span>
+                  <input
+                    id="fileName"
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                    type="text"
+                    value={fileName}
+                    onChange={(event) => setFileName(event.target.value)}
+                  />
+                </label>
+
+                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200 sm:col-span-2 xl:col-span-2">
+                  <input
+                    checked={saveScad}
+                    className="h-4 w-4 accent-sky-400"
+                    type="checkbox"
+                    onChange={(event) => setSaveScad(event.target.checked)}
+                  />
+                  Save an OpenSCAD export in `backend/exports/`
+                </label>
+              </div>
+            </CollapsibleSection>
+          </StudioPanel>
+
+          <div className="studio-shell-body">
+          <StudioPanel className="studio-builders-rail studio-side-rail space-y-4 p-4">
               <CollapsibleSection
                 title="Builder Rule Sets"
                 description="Each builder runs against the same occupied grid, so collapsing each card keeps the rail readable."
@@ -748,7 +808,7 @@ export function BrickBuilderStudio() {
                       <CollapsibleSection
                         key={`${builder.id}-${index}`}
                         title={`Builder ${index + 1}`}
-                        description="Collapse finished rule cards to keep the left rail compact."
+                        description="Collapse finished rule cards to keep the Builders rail compact."
                         defaultOpen={index === 0}
                         summary={
                           <>
@@ -929,6 +989,14 @@ export function BrickBuilderStudio() {
                                   </option>
                                 ))}
                               </select>
+                              {archetypeProfiles[builder.archetype] && (
+                                <div className="mt-1 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-slate-400 space-y-0.5">
+                                  <div><span className="text-slate-500">Strategy:</span> {archetypeProfiles[builder.archetype].initialStrategy}</div>
+                                  <div><span className="text-slate-500">Shifts:</span> {archetypeProfiles[builder.archetype].allowedStrategyShifts.join(", ")}</div>
+                                  <div><span className="text-slate-500">Symmetry:</span> {archetypeProfiles[builder.archetype].symmetryMode}</div>
+                                  <div><span className="text-slate-500">Weights:</span> {Object.entries(archetypeProfiles[builder.archetype].defaultObjectiveWeights).map(([k, v]) => `${k}:${v}`).join("  ")}</div>
+                                </div>
+                              )}
                             </label>
 
                             <label className="space-y-2 text-sm text-slate-200">
@@ -1101,29 +1169,14 @@ export function BrickBuilderStudio() {
                   )}
                 </div>
               </CollapsibleSection>
-            </form>
-        </StudioPanel>
+          </StudioPanel>
 
-        <div className="space-y-5">
-          <StudioPanel className="p-4 lg:p-5">
+          <div className="studio-center studio-preview-workspace space-y-5">
+            <StudioPanel className="p-4 lg:p-5">
             <PanelHeader
               eyebrow="Brick Builder Studio"
               title="Rule-driven generator workspace"
-              description="Tune builders on the left and keep the Three.js scene in view on the right while runtime details stay tucked into collapsible panels below."
-              actions={
-                <div className="flex flex-wrap gap-2">
-                  <StatusLight
-                    label={isLoading ? "Generating" : result ? "Ready" : "Idle"}
-                    tone={generationTone}
-                  />
-                  <StatusLight label="Builders" tone="info" value={builders.length} />
-                  <StatusLight label="Visible cubes" tone="info" value={filteredBricks.length} />
-                  <StatusLight
-                    label={downloadUrl || jsonDownloadUrl ? "Exports saved" : "Exports pending"}
-                    tone={exportTone}
-                  />
-                </div>
-              }
+              description="Preview shows committed cubes from the latest simulation. Filter by builder to inspect continuity; open Run Diagnostics on the right for metrics and traces."
             />
 
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
@@ -1147,22 +1200,66 @@ export function BrickBuilderStudio() {
                 tone="neutral"
               />
               <p className="text-slate-400">
-                Showing {filteredBricks.length} cube{filteredBricks.length === 1 ? "" : "s"}.
+                Showing {tickFilteredBricks.length} cube{tickFilteredBricks.length === 1 ? "" : "s"}
+                {currentTick !== null && <span className="ml-1 text-slate-500">(tick {currentTick}/{maxTick})</span>}.
               </p>
             </div>
+
+            {/* Timeline scrubber */}
+            {result && maxTick > 0 && (
+              <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    onClick={() => {
+                      if (isPlaying) { stopPlayback(); } else { startPlayback(); }
+                    }}
+                    title={isPlaying ? "Pause" : "Play"}
+                  >
+                    {isPlaying ? "⏸" : "▶"}
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={maxTick}
+                    value={currentTick ?? maxTick}
+                    className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-white/10 accent-sky-400 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-sky-400"
+                    onChange={(e) => {
+                      stopPlayback();
+                      setCurrentTick(Number(e.target.value));
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-400 transition hover:bg-white/10 hover:text-slate-200"
+                    onClick={() => { stopPlayback(); setCurrentTick(null); }}
+                  >
+                    Show All
+                  </button>
+                </div>
+                {currentTickSnapshot && (
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+                    <span>Tick <span className="font-mono text-slate-200">{currentTickSnapshot.tick}</span></span>
+                    <span>Bricks <span className="font-mono text-slate-200">{currentTickSnapshot.brickCount}</span></span>
+                    <span>+<span className="font-mono text-slate-200">{currentTickSnapshot.placementsThisTick ?? 0}</span> this tick</span>
+                    <span>Active <span className="font-mono text-slate-200">{currentTickSnapshot.activeBuilders ?? "?"}</span></span>
+                    {currentTickSnapshot.scoresByBuilder && (
+                      <>
+                        {Object.entries(currentTickSnapshot.scoresByBuilder).map(([bid, score]) => (
+                          <span key={bid}>{bid}: <span className="font-mono text-slate-200">{score}</span></span>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <BrickPreviewCanvas
-              bricks={filteredBricks}
+              bricks={tickFilteredBricks}
               className="mt-4 h-[520px] sm:h-[560px] lg:h-[calc(100vh-13rem)] lg:min-h-[680px]"
             />
-
-            <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-7 text-slate-300">
-              <p>
-                The live preview renders the committed cube instances from the simulation.
-                Filter by builder to inspect continuity and use the diagnostics below to
-                understand why a builder placed, skipped, backtracked, or stopped.
-              </p>
-            </div>
           </StudioPanel>
 
           {error ? (
@@ -1174,8 +1271,9 @@ export function BrickBuilderStudio() {
               />
             </StudioPanel>
           ) : null}
+          </div>
 
-          <StudioPanel className="p-4 lg:p-5">
+          <StudioPanel className="studio-diagnostics-rail studio-side-rail p-4 lg:p-5">
             <PanelHeader
               eyebrow="Run Diagnostics"
               title="Output and runtime details"
@@ -1266,14 +1364,63 @@ export function BrickBuilderStudio() {
                 </CollapsibleSection>
 
                 <CollapsibleSection
-                  title="Builder Runtime State"
-                  description="Per-builder runtime details returned by the simulation."
-                  summary={result ? <span>{result.builderStates.length} runtime records</span> : <span>No run yet</span>}
+                  title="Builder Scores"
+                  description="Per-builder scores and strategy state."
+                  summary={result ? <span>{result.builderStates.length} builders</span> : <span>No run yet</span>}
                 >
-                  <JsonBlock
-                    emptyLabel="Runtime state will appear here after the first successful run."
-                    value={result?.builderStates}
-                  />
+                  {result?.builderStates && result.builderStates.length > 0 ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {result.builderStates.map((bs) => (
+                        <div key={bs.id} className="rounded-xl border border-white/10 bg-black/30 p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-slate-100">{bs.id}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                              bs.status === "active" ? "bg-green-500/20 text-green-300" :
+                              bs.status === "completed" ? "bg-sky-500/20 text-sky-300" :
+                              "bg-red-500/20 text-red-300"
+                            }`}>{bs.status}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div>
+                              <div className="text-lg font-bold text-slate-50">{typeof bs.score === "number" ? bs.score.toFixed(1) : "—"}</div>
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Total Score</div>
+                            </div>
+                            <div>
+                              <div className="text-lg font-bold text-slate-50">{bs.placementCount}</div>
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Placements</div>
+                            </div>
+                            <div>
+                              <div className="text-lg font-bold text-slate-50">{bs.currentStrategy ?? "—"}</div>
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Strategy</div>
+                            </div>
+                          </div>
+                          {bs.scoreBreakdown && Object.keys(bs.scoreBreakdown).length > 0 && (
+                            <div className="space-y-1">
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Score Breakdown</div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+                                {Object.entries(bs.scoreBreakdown).map(([cat, val]) => (
+                                  <div key={cat} className="flex justify-between">
+                                    <span className="text-slate-400">{cat}</span>
+                                    <span className="font-mono text-slate-200">{typeof val === "number" ? val.toFixed(2) : val}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {bs.archetype && (
+                            <div className="text-xs text-slate-500">
+                              Archetype: <span className="text-slate-400">{bs.archetype}</span>
+                              {bs.symmetryMode && bs.symmetryMode !== "none" && (
+                                <span> · Sym: {bs.symmetryMode}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">Run the generator to see builder scores.</p>
+                  )}
                 </CollapsibleSection>
 
                 <CollapsibleSection
@@ -1370,7 +1517,6 @@ export function BrickBuilderStudio() {
                             <th className="border-b border-white/10 px-2 py-2">Tick</th>
                             <th className="border-b border-white/10 px-2 py-2">Builder</th>
                             <th className="border-b border-white/10 px-2 py-2">Strategy</th>
-                            <th className="border-b border-white/10 px-2 py-2">Sel.</th>
                             <th className="border-b border-white/10 px-2 py-2">Δ</th>
                             <th className="border-b border-white/10 px-2 py-2">Run / total</th>
                             <th className="border-b border-white/10 px-2 py-2">Breakdown</th>
@@ -1387,7 +1533,6 @@ export function BrickBuilderStudio() {
                               <td className="px-2 py-2 font-mono">{event.tick}</td>
                               <td className="px-2 py-2">{event.builderId}</td>
                               <td className="max-w-[120px] truncate px-2 py-2">{event.strategy}</td>
-                              <td className="px-2 py-2">{event.selectionMode ?? "—"}</td>
                               <td className="px-2 py-2 font-mono">{telemetryDelta(event)}</td>
                               <td className="px-2 py-2 font-mono">{telemetryRunning(event)}</td>
                               <td className="max-w-[220px] truncate px-2 py-2 text-slate-400">
@@ -1399,9 +1544,7 @@ export function BrickBuilderStudio() {
                               <td className="max-w-[140px] truncate px-2 py-2 text-slate-400">
                                 {event.strategyBefore != null || event.strategyAfter != null
                                   ? `${event.strategyBefore ?? "—"} → ${event.strategyAfter ?? "—"}`
-                                  : event.previousStrategy != null
-                                    ? String(event.previousStrategy)
-                                    : "—"}
+                                  : "—"}
                               </td>
                             </tr>
                           ))}
@@ -1447,7 +1590,8 @@ export function BrickBuilderStudio() {
                 </CollapsibleSection>
             </div>
           </StudioPanel>
-        </div>
+          </div>
+        </form>
       </main>
     </div>
   );

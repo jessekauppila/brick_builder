@@ -24,6 +24,13 @@ type SceneBounds = {
   radius: number;
 };
 
+// Backend coords: (x, y, z) where Z is up.
+// Three.js coords: (x, y, z) where Y is up.
+// We swap: backend (bx, by, bz) -> Three.js (bx, bz, -by)
+function toThreeJS(bx: number, by: number, bz: number): [number, number, number] {
+  return [bx, bz, -by];
+}
+
 function getSceneBounds(bricks: BrickRecord[]): SceneBounds {
   if (bricks.length === 0) {
     return { center: [0, 0, 0], radius: 40 };
@@ -37,14 +44,16 @@ function getSceneBounds(bricks: BrickRecord[]): SceneBounds {
   let maxZ = Number.NEGATIVE_INFINITY;
 
   for (const brick of bricks) {
-    const [x, y, z] = brick.position;
-    const [width, height, depth] = brick.size;
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    minZ = Math.min(minZ, z);
-    maxX = Math.max(maxX, x + width);
-    maxY = Math.max(maxY, y + height);
-    maxZ = Math.max(maxZ, z + depth);
+    const [bx, by, bz] = brick.position;
+    const [w, h, d] = brick.size;
+    const [x1, y1, z1] = toThreeJS(bx, by, bz);
+    const [x2, y2, z2] = toThreeJS(bx + w, by + h, bz + d);
+    minX = Math.min(minX, x1, x2);
+    minY = Math.min(minY, y1, y2);
+    minZ = Math.min(minZ, z1, z2);
+    maxX = Math.max(maxX, x1, x2);
+    maxY = Math.max(maxY, y1, y2);
+    maxZ = Math.max(maxZ, z1, z2);
   }
 
   return {
@@ -75,11 +84,12 @@ function InstancedBricks({
     const tempColor = new THREE.Color();
 
     bricks.forEach((brick, index) => {
-      const [x, y, z] = brick.position;
-      const [width, height, depth] = brick.size;
+      const [bx, by, bz] = brick.position;
+      const [w, h, d] = brick.size;
+      const [tx, ty, tz] = toThreeJS(bx, by, bz);
 
-      tempObject.position.set(x + width / 2, y + height / 2, z + depth / 2);
-      tempObject.scale.set(width, height, depth);
+      tempObject.position.set(tx + w / 2, ty + d / 2, tz + h / 2);
+      tempObject.scale.set(w, d, h);
       tempObject.updateMatrix();
 
       mesh.setMatrixAt(index, tempObject.matrix);
@@ -106,7 +116,9 @@ function InstancedBricks({
 
   return (
     <>
-      <gridHelper args={[bounds.radius * 2, 20, "#52525b", "#27272a"]} />
+      <group position={[bounds.center[0], 0, bounds.center[2]]}>
+        <gridHelper args={[bounds.radius * 2, 20, "#52525b", "#27272a"]} />
+      </group>
       <axesHelper args={[bounds.radius * 0.75]} />
       <instancedMesh ref={meshRef} args={[undefined, undefined, bricks.length]}>
         <boxGeometry args={[1, 1, 1]} />

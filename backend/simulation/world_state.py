@@ -105,11 +105,12 @@ class WorldState:
         max_attempts: int = 5000,
     ) -> tuple[Vector3, str]:
         half = self.cube_cage // self.brick_unit
+        z_max = self.cube_cage // self.brick_unit
         for _ in range(max_attempts):
             anchor = (
                 rng.randint(-half, half) * self.brick_unit,
                 rng.randint(-half, half) * self.brick_unit,
-                rng.randint(-half, half) * self.brick_unit,
+                rng.randint(0, z_max) * self.brick_unit,
             )
             orientation = rng.choice(HORIZONTAL_ORIENTATIONS)
             if self.can_place(shape, anchor, orientation):
@@ -201,6 +202,13 @@ class WorldState:
             if metadata.builder_id == builder_id
         ]
 
+    def enemy_cells(self, builder_id: str) -> list[Vector3]:
+        return [
+            cell
+            for cell, metadata in self.occupied_metadata.items()
+            if metadata.builder_id != builder_id
+        ]
+
     def control_neighbors(self, cells: list[Vector3]) -> set[Vector3]:
         cell_set = set(cells)
         control_cells: set[Vector3] = set()
@@ -227,7 +235,7 @@ class WorldState:
         return (
             -self.cube_cage <= x <= self.cube_cage
             and -self.cube_cage <= y <= self.cube_cage
-            and -self.cube_cage <= z <= self.cube_cage
+            and 0 <= z <= self.cube_cage
         )
 
     def _neighbors(self, cell: Vector3) -> list[Vector3]:

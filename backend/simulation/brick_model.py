@@ -350,12 +350,22 @@ class BrickModel:
 
     def _build_tick_snapshot(self, tick: int) -> dict[str, object]:
         events = [event for event in self.trace if event["tick"] == tick]
+        active = sum(1 for b in self.builder_agents if b.status == "active")
+        blocked = sum(1 for b in self.builder_agents if b.status == "blocked")
+        placements = sum(1 for e in events if e.get("action") == "placed")
         return {
             "tick": tick,
             "brickCount": len(self.bricks),
             "placementCount": sum(
                 builder_agent.placement_count for builder_agent in self.builder_agents
             ),
+            "placementsThisTick": placements,
+            "activeBuilders": active,
+            "blockedBuilders": blocked,
+            "scoresByBuilder": {
+                b.config.id: round(b.total_score, 3)
+                for b in self.builder_agents
+            },
             "builders": self.get_builder_states(),
             "events": events,
         }

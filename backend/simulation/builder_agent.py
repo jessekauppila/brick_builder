@@ -134,6 +134,7 @@ class BuilderAgent:
         self.buildability_profile = default_buildability_profile(config.archetype)
         self.buildability_profile.update(config.buildability_profile)
         self.symmetry_mode = config.symmetry_mode or profile.symmetry_mode
+        self.selection_mode = getattr(config, "selection_mode", "legacy")
         self.placement_count = 0
         self.last_anchor: Optional[Vector3] = None
         self.last_orientation: Optional[str] = None
@@ -314,11 +315,42 @@ class BuilderAgent:
         )
         if not evaluations:
             return None
+
+        if self.selection_mode == "competitive":
+            return self._select_competitive(evaluations, world_state)
+
         best_score = max(evaluation.total_score for evaluation in evaluations)
         best_matches = [
             evaluation
             for evaluation in evaluations
             if abs(evaluation.total_score - best_score) < 1e-6
+        ]
+        return self.rng.choice(best_matches)
+
+    def _select_competitive(
+        self,
+        evaluations: list[CandidateEvaluation],
+        world_state: WorldState,
+    ) -> CandidateEvaluation:
+        enemy_cells = world_state.enemy_cells(self.config.id)
+        for ev in evaluations:
+            if enemy_cells:
+                min_dist = min(
+                    abs(ev.candidate.anchor[0] - ex) +
+                    abs(ev.candidate.anchor[1] - ey) +
+                    abs(ev.candidate.anchor[2] - ez)
+                    for ex, ey, ez in enemy_cells
+                )
+                proximity_bonus = max(0.0, 10.0 - min_dist / max(self.brick_unit, 1))
+            else:
+                proximity_bonus = 0.0
+            ev_score = ev.total_score + proximity_bonus + ev.analysis.choke_points * 1.5
+            ev.__dict__["_competitive_score"] = ev_score
+
+        best_score = max(ev.__dict__["_competitive_score"] for ev in evaluations)
+        best_matches = [
+            ev for ev in evaluations
+            if abs(ev.__dict__["_competitive_score"] - best_score) < 1e-6
         ]
         return self.rng.choice(best_matches)
 
@@ -674,7 +706,7 @@ class BuilderAgent:
             strategy=strategy or self.current_strategy,
             reference_cell=reference_cell,
             status=status or self.status,
-            score_delta=0.0 if action == "placed" else score_total,
+            score_delta=score_total,
             scores=score_events,
             support_path_exists=analysis.support_path_exists if analysis else None,
             supported=supported if analysis else None,
