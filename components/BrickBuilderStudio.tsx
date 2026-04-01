@@ -10,6 +10,7 @@ import {
   PanelHeader,
   StatusLight,
   StudioPanel,
+  Tooltip,
 } from "@/components/hmi/StudioPrimitives";
 
 type BuilderInput = {
@@ -216,7 +217,7 @@ const DEFAULT_CATALOG: CatalogResponse = {
       maxBacktrackDepth: 200,
       archetype: "fortress",
       selectionMode: "competitive",
-      symmetryMode: "mirror_x",
+      symmetryMode: "none",
       objectiveWeights: {},
     },
     {
@@ -381,10 +382,20 @@ function splitStepsAcrossBuilderPlacements(total: number, count: number): number
   return Array.from({ length: count }, (_, i) => base + (i < rem ? 1 : 0));
 }
 
+const WEIGHT_CATEGORY_TIPS: Record<string, string> = {
+  territory: "How much this builder values claiming empty grid space and area control.",
+  surface: "How much this builder values maximizing exposed surface area of its structure.",
+  enclosure: "How much this builder values creating enclosed or walled-off regions.",
+  chain: "How much this builder values maintaining long continuous chains of bricks.",
+  support: "How much this builder values structural support and vertical stability.",
+  choke: "How much this builder values blocking opponents at narrow access points.",
+  symmetry: "How much this builder values maintaining symmetric placement patterns.",
+};
+
 export function BrickBuilderStudio() {
-  const [totalSteps, setTotalSteps] = useState("200");
+  const [totalSteps, setTotalSteps] = useState("100");
   const [splitPlacementsFromTotalSteps, setSplitPlacementsFromTotalSteps] = useState(true);
-  const [cubeCage, setCubeCage] = useState("200");
+  const [cubeCage, setCubeCage] = useState("50");
   const [seed, setSeed] = useState("");
   const [fileName, setFileName] = useState("sample.scad");
   const [saveScad, setSaveScad] = useState(true);
@@ -696,7 +707,7 @@ export function BrickBuilderStudio() {
           id="studio-generate"
           onSubmit={handleSubmit}
         >
-          <StudioPanel className="studio-shell-top space-y-4 p-4">
+          <StudioPanel className="studio-shell-top space-y-2 px-4 py-2">
             <PanelHeader
               title="Run & export"
               actions={
@@ -895,7 +906,7 @@ export function BrickBuilderStudio() {
 
                           <div className="grid gap-3 sm:grid-cols-2">
                             <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Archetype</span>
+                              <span className="block font-medium"><Tooltip text="The behavioral profile that shapes this builder's strategy, scoring priorities, and symmetry defaults.">Archetype</Tooltip></span>
                               <select
                                 className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
                                 value={builder.archetype}
@@ -914,22 +925,22 @@ export function BrickBuilderStudio() {
                                   <summary className="cursor-pointer text-[0.65rem] text-slate-500 hover:text-slate-300 transition select-none">
                                     details
                                   </summary>
-                                  <div className="mt-1 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-slate-400 space-y-0.5">
-                                    <div title="The opening strategy the builder uses at the start of a run">
-                                      <span className="text-slate-500">Strategy:</span> {archetypeProfiles[builder.archetype].initialStrategy}
+                                  <div className="mt-1 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-slate-400 space-y-1">
+                                    <div>
+                                      <Tooltip text="The opening strategy the builder uses at the start of a run (e.g. 'reinforce' strengthens existing structure, 'expand' grows outward)."><span className="text-slate-500">Strategy</span></Tooltip>: {archetypeProfiles[builder.archetype].initialStrategy}
                                     </div>
-                                    <div title="Other strategies this archetype is allowed to switch to mid-run based on game state">
-                                      <span className="text-slate-500">Shifts:</span> {archetypeProfiles[builder.archetype].allowedStrategyShifts.join(", ")}
+                                    <div>
+                                      <Tooltip text="Other strategies this archetype may switch to mid-run based on game state (e.g. 'expand' grows outward, 'pillar' builds vertically, 'reinforce' strengthens)."><span className="text-slate-500">Shifts</span></Tooltip>: {archetypeProfiles[builder.archetype].allowedStrategyShifts.join(", ")}
                                     </div>
-                                    <div title="Mirror or rotational symmetry applied to placements (e.g. mirror_x reflects across the X axis)">
-                                      <span className="text-slate-500">Symmetry:</span> {archetypeProfiles[builder.archetype].symmetryMode}
+                                    <div>
+                                      <Tooltip text="Mirror or rotational symmetry applied to placements (e.g. mirror_x reflects every brick across the X axis)."><span className="text-slate-500">Symmetry</span></Tooltip>: {archetypeProfiles[builder.archetype].symmetryMode}
                                     </div>
-                                    <div title="Scoring weights that determine how the builder evaluates candidate placements — higher values mean that category matters more">
-                                      <span className="text-slate-500">Weights:</span>{" "}
+                                    <div>
+                                      <Tooltip text="Scoring weights that determine how the builder evaluates candidate placements — higher values mean that category matters more."><span className="text-slate-500">Weights</span></Tooltip>:{" "}
                                       {Object.entries(archetypeProfiles[builder.archetype].defaultObjectiveWeights).map(([k, v]) => (
-                                        <span key={k} className="mr-1.5 inline-block" title={`${k}: how much this archetype values ${k} when scoring placements (weight ${v})`}>
-                                          {k}:{v}
-                                        </span>
+                                        <Tooltip key={k} text={WEIGHT_CATEGORY_TIPS[k] ?? `Weight for the '${k}' scoring category (value: ${v}).`}>
+                                          <span className="mr-1.5 inline-block">{k}:{v}</span>
+                                        </Tooltip>
                                       ))}
                                     </div>
                                   </div>
@@ -938,7 +949,7 @@ export function BrickBuilderStudio() {
                             </label>
 
                             <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Selection mode</span>
+                              <span className="block font-medium"><Tooltip text="How the builder picks among valid candidates — 'legacy' uses the first valid spot, 'competitive' scores all options and picks the best.">Selection mode</Tooltip></span>
                               <select
                                 className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
                                 value={builder.selectionMode}
@@ -954,87 +965,8 @@ export function BrickBuilderStudio() {
                               </select>
                             </label>
 
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Continuity</span>
-                              <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                value={builder.continuityMode}
-                                onChange={(event) =>
-                                  updateBuilder(index, {
-                                    continuityMode: event.target.value,
-                                  })
-                                }
-                              >
-                                {catalog.continuityModes.map((mode) => (
-                                  <option key={mode.id} value={mode.id}>
-                                    {mode.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Failure policy</span>
-                              <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                value={builder.failurePolicy}
-                                onChange={(event) =>
-                                  updateBuilder(index, {
-                                    failurePolicy: event.target.value,
-                                  })
-                                }
-                              >
-                                {catalog.failurePolicies.map((policy) => (
-                                  <option key={policy.id} value={policy.id}>
-                                    {policy.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Id</span>
-                              <input
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                type="text"
-                                value={builder.id}
-                                onChange={(event) =>
-                                  updateBuilder(index, { id: event.target.value })
-                                }
-                              />
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Color</span>
-                              <input
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                type="text"
-                                value={builder.color}
-                                onChange={(event) =>
-                                  updateBuilder(index, { color: event.target.value })
-                                }
-                              />
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Shape</span>
-                              <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                value={builder.shapeId}
-                                onChange={(event) =>
-                                  updateBuilder(index, { shapeId: event.target.value })
-                                }
-                              >
-                                {catalog.shapes.map((shape) => (
-                                  <option key={shape.id} value={shape.id}>
-                                    {shape.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Placement rule</span>
+                            <label className="space-y-2 text-sm text-slate-200 sm:col-span-2">
+                              <span className="block font-medium"><Tooltip text="The algorithm that generates candidate positions and orientations for new bricks.">Placement rule</Tooltip></span>
                               <select
                                 className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
                                 value={builder.placementRuleId}
@@ -1052,10 +984,125 @@ export function BrickBuilderStudio() {
                               </select>
                             </label>
 
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Placements</span>
+                          <CollapsibleSection
+                            className="sm:col-span-2"
+                            title="More"
+                            defaultOpen={false}
+                            summary={
+                              <>
+                                <span className="max-w-[100px] truncate">{builder.id}</span>
+                                <span className="hidden sm:inline">{shapeLabel}</span>
+                                <span>{builder.maxPlacements} plc</span>
+                              </>
+                            }
+                          >
+                            <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="Whether each new brick must connect to the builder's most recent placement, enforcing a continuous chain of bricks.">Continuity</Tooltip></span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.continuityMode}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    continuityMode: event.target.value,
+                                  })
+                                }
+                              >
+                                {catalog.continuityModes.map((mode) => (
+                                  <option key={mode.id} value={mode.id}>
+                                    {mode.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="What the builder does when no valid placement exists — backtrack undoes past moves, stop halts the builder, skip waits a tick, fallback tries a random spot.">Failure policy</Tooltip></span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.failurePolicy}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    failurePolicy: event.target.value,
+                                  })
+                                }
+                              >
+                                {catalog.failurePolicies.map((policy) => (
+                                  <option key={policy.id} value={policy.id}>
+                                    {policy.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <div className="sm:col-span-2 grid grid-cols-3 gap-3">
+                              {(["X", "Y", "Z"] as const).map((axis, axisIndex) => (
+                                <label key={axis} className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                                  <span className="block font-medium">Start {axis}</span>
+                                  <input
+                                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                    type="number"
+                                    value={builder.startAnchor[axisIndex]}
+                                    onChange={(event) =>
+                                      updateBuilder(index, {
+                                        startAnchor: builder.startAnchor.map(
+                                          (value, anchorIndex) =>
+                                            anchorIndex === axisIndex
+                                              ? event.target.value
+                                              : value,
+                                        ) as [string, string, string],
+                                      })
+                                    }
+                                  />
+                                </label>
+                              ))}
+                            </div>
+
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="A unique name identifying this builder in logs, scores, and the 3D preview.">Id</Tooltip></span>
                               <input
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                type="text"
+                                value={builder.id}
+                                onChange={(event) =>
+                                  updateBuilder(index, { id: event.target.value })
+                                }
+                              />
+                            </label>
+
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="The display color used to render this builder's bricks in the 3D preview.">Color</Tooltip></span>
+                              <input
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                type="text"
+                                value={builder.color}
+                                onChange={(event) =>
+                                  updateBuilder(index, { color: event.target.value })
+                                }
+                              />
+                            </label>
+
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="The brick geometry this builder places each tick (e.g. 1×1 single cube, 2×1 bar).">Shape</Tooltip></span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.shapeId}
+                                onChange={(event) =>
+                                  updateBuilder(index, { shapeId: event.target.value })
+                                }
+                              >
+                                {catalog.shapes.map((shape) => (
+                                  <option key={shape.id} value={shape.id}>
+                                    {shape.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="Maximum number of bricks this builder is allowed to place during the simulation.">Placements</Tooltip></span>
+                              <input
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
                                 disabled={splitPlacementsFromTotalSteps}
                                 min="0"
                                 max="2000"
@@ -1069,10 +1116,10 @@ export function BrickBuilderStudio() {
                               />
                             </label>
 
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Backtrack depth</span>
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="How many past placements the builder can undo when using the 'backtrack' failure policy.">Backtrack depth</Tooltip></span>
                               <input
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
                                 min="1"
                                 max="5000"
                                 type="number"
@@ -1085,10 +1132,10 @@ export function BrickBuilderStudio() {
                               />
                             </label>
 
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Symmetry</span>
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200">
+                              <span className="block font-medium"><Tooltip text="Mirror or rotational constraint on placements — e.g. mirror_x reflects every brick across the X axis.">Symmetry</Tooltip></span>
                               <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-50 outline-none transition focus:border-sky-400"
                                 value={builder.symmetryMode}
                                 onChange={(event) =>
                                   updateBuilder(index, { symmetryMode: event.target.value })
@@ -1102,10 +1149,10 @@ export function BrickBuilderStudio() {
                               </select>
                             </label>
 
-                            <label className="space-y-2 text-sm text-slate-200 sm:col-span-2">
-                              <span className="block font-medium">Objective weights (JSON)</span>
+                            <label className="space-y-1.5 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200 sm:col-span-2">
+                              <span className="block font-medium"><Tooltip text="A JSON map of scoring category → weight that tunes how the builder evaluates candidates. Use {} for archetype defaults.">Objective weights (JSON)</Tooltip></span>
                               <textarea
-                                className="min-h-[88px] w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 font-mono text-xs text-slate-50 outline-none transition focus:border-sky-400"
+                                className="min-h-[72px] w-full rounded-2xl border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-slate-50 outline-none transition focus:border-sky-400"
                                 spellCheck={false}
                                 value={builder.objectiveWeightsJson}
                                 onChange={(event) =>
@@ -1114,34 +1161,13 @@ export function BrickBuilderStudio() {
                                   })
                                 }
                               />
-                              <span className="block text-xs text-slate-500">
+                              <span className="block text-[0.65rem] text-slate-500">
                                 Use catalog scoring category ids as keys, or {"{}"} for archetype
                                 defaults.
                               </span>
                             </label>
-                          </div>
-
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            {(["X", "Y", "Z"] as const).map((axis, axisIndex) => (
-                              <label key={axis} className="space-y-2 text-sm text-slate-200">
-                                <span className="block font-medium">Start {axis}</span>
-                                <input
-                                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                  type="number"
-                                  value={builder.startAnchor[axisIndex]}
-                                  onChange={(event) =>
-                                    updateBuilder(index, {
-                                      startAnchor: builder.startAnchor.map(
-                                        (value, anchorIndex) =>
-                                          anchorIndex === axisIndex
-                                            ? event.target.value
-                                            : value,
-                                      ) as [string, string, string],
-                                    })
-                                  }
-                                />
-                              </label>
-                            ))}
+                            </div>
+                          </CollapsibleSection>
                           </div>
                         </div>
                       </CollapsibleSection>

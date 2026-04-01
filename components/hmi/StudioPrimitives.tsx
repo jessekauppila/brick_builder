@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -85,7 +85,7 @@ export function CollapsibleSection({
           </div>
           {description ? <p className="pl-6 text-xs leading-5 text-slate-400">{description}</p> : null}
         </div>
-        {summary ? <div className="hidden min-w-0 items-center gap-2 text-xs text-slate-300 sm:flex">{summary}</div> : null}
+        {summary ? <div className="hidden min-w-0 items-center gap-1.5 text-[0.65rem] leading-tight text-slate-400 sm:flex">{summary}</div> : null}
       </button>
       {isOpen ? (
         <div className={cx("border-t border-white/10 px-4 py-4", contentClassName)}>{children}</div>
@@ -138,5 +138,58 @@ export function JsonBlock({ value, emptyLabel }: JsonBlockProps) {
     <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-black/30 p-4 text-xs leading-6 text-slate-200">
       {JSON.stringify(value, null, 2)}
     </pre>
+  );
+}
+
+type TooltipProps = {
+  text: string;
+  children: ReactNode;
+};
+
+export function Tooltip({ text, children }: TooltipProps) {
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+
+  const show = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPos({ x: rect.left + rect.width / 2, y: rect.top });
+  }, []);
+
+  const hide = useCallback(() => setPos(null), []);
+
+  return (
+    <span
+      ref={triggerRef}
+      className="group/tip relative inline-flex cursor-help items-center gap-1"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+    >
+      {children}
+      <svg
+        className={cx(
+          "h-3.5 w-3.5 shrink-0 transition-colors",
+          pos ? "text-sky-400" : "text-slate-500",
+        )}
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
+        <circle cx="8" cy="8" r="6.25" />
+        <path d="M6.5 6.5a1.5 1.5 0 1 1 1.5 1.5v1" strokeLinecap="round" />
+        <circle cx="8" cy="11.5" r="0.5" fill="currentColor" stroke="none" />
+      </svg>
+      {pos && (
+        <span
+          className="pointer-events-none fixed z-[9999] w-60 rounded-lg border border-white/10 bg-slate-900/95 px-3 py-2 text-[0.7rem] font-normal leading-relaxed text-slate-300 shadow-xl backdrop-blur"
+          style={{ top: pos.y - 8, left: pos.x, transform: "translate(-50%, -100%)" }}
+        >
+          {text}
+          <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-slate-900/95" />
+        </span>
+      )}
+    </span>
   );
 }
