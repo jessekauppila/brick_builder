@@ -39,9 +39,9 @@ Deprecated term: **Control Rail** — replaced by **Run & export** for the top p
 
 **Run Diagnostics** children (collapsible):
 
+- **Builder Scores** — Per-builder scores, placements, strategy, and breakdown (`builderStates`). Open by default.
 - **Run Summary** — API target, result metrics, export actions.
 - **Builder Configs Used** — Serialized builder inputs for the latest generation request.
-- **Builder Runtime State** — Per-builder runtime details from the simulation.
 - **Timeline (recent ticks)** — Per-tick snapshots (newest first in table).
 - **Placement telemetry** — Recent placed events with score and support context when the engine provides them.
 - **Recent Trace Events** — Last trace events, newest first.

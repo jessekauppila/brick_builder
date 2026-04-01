@@ -370,8 +370,20 @@ function telemetrySupport(event: TraceEvent): string {
   return parts.length > 0 ? parts.join(" ") : "—";
 }
 
+/** Integer placements per builder that sum to `total`; remainder goes to the first builders. */
+function splitStepsAcrossBuilderPlacements(total: number, count: number): number[] {
+  if (count <= 0) {
+    return [];
+  }
+  const t = Math.max(0, Math.min(2000, Math.floor(total)));
+  const base = Math.floor(t / count);
+  const rem = t % count;
+  return Array.from({ length: count }, (_, i) => base + (i < rem ? 1 : 0));
+}
+
 export function BrickBuilderStudio() {
   const [totalSteps, setTotalSteps] = useState("200");
+  const [splitPlacementsFromTotalSteps, setSplitPlacementsFromTotalSteps] = useState(true);
   const [cubeCage, setCubeCage] = useState("200");
   const [seed, setSeed] = useState("");
   const [fileName, setFileName] = useState("sample.scad");
@@ -465,6 +477,25 @@ export function BrickBuilderStudio() {
       (brick) => brick.builderId === selectedBuilderFilter,
     );
   }, [result, selectedBuilderFilter]);
+
+  useEffect(() => {
+    if (!splitPlacementsFromTotalSteps) {
+      return;
+    }
+    const n = builders.length;
+    if (n === 0) {
+      return;
+    }
+    const raw = Number.parseInt(totalSteps, 10);
+    const steps = Number.isFinite(raw) ? Math.max(1, Math.min(2000, raw)) : 1;
+    const shares = splitStepsAcrossBuilderPlacements(steps, n);
+    setBuilders((prev) => {
+      if (prev.length !== n) {
+        return prev;
+      }
+      return prev.map((b, i) => ({ ...b, maxPlacements: String(shares[i] ?? 0) }));
+    });
+  }, [splitPlacementsFromTotalSteps, totalSteps, builders.length]);
 
   const tickFilteredBricks = useMemo(() => {
     if (currentTick === null) return filteredBricks;
@@ -668,7 +699,6 @@ export function BrickBuilderStudio() {
           <StudioPanel className="studio-shell-top space-y-4 p-4">
             <PanelHeader
               title="Run & export"
-              description="Status, generate, and high-level simulation parameters. Builder rule sets and balance sit in the Builders rail to the left; Run Diagnostics sits on the right. The Preview workspace in the center is twice as wide as each rail so the 3D view stays primary."
               actions={
                 <div className="flex flex-wrap items-center justify-end gap-3">
                   <div className="flex flex-wrap gap-2">
@@ -696,20 +726,20 @@ export function BrickBuilderStudio() {
             <CollapsibleSection
               title="Generation Settings"
               description="High-level run controls for the shared simulation."
-              defaultOpen
               summary={
                 <>
                   <span>{totalSteps} steps</span>
                   <span>{cubeCage} cage</span>
+                  {seed && <span>seed {seed}</span>}
                 </>
               }
             >
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <label className="space-y-2 text-sm text-slate-200" htmlFor="totalSteps">
-                  <span className="block font-medium">Total steps</span>
+              <div className="grid grid-cols-3 gap-x-3 gap-y-2">
+                <label className="text-sm text-slate-200" htmlFor="totalSteps">
+                  <span className="block text-xs font-medium text-slate-400">Steps</span>
                   <input
                     id="totalSteps"
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-slate-50 outline-none transition focus:border-sky-400"
                     min="1"
                     max="2000"
                     type="number"
@@ -718,23 +748,23 @@ export function BrickBuilderStudio() {
                   />
                 </label>
 
-                <label className="space-y-2 text-sm text-slate-200" htmlFor="seed">
-                  <span className="block font-medium">Seed</span>
+                <label className="text-sm text-slate-200" htmlFor="seed">
+                  <span className="block text-xs font-medium text-slate-400">Seed</span>
                   <input
                     id="seed"
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                    placeholder="Optional"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-slate-50 outline-none transition focus:border-sky-400"
+                    placeholder="—"
                     type="number"
                     value={seed}
                     onChange={(event) => setSeed(event.target.value)}
                   />
                 </label>
 
-                <label className="space-y-2 text-sm text-slate-200" htmlFor="cubeCage">
-                  <span className="block font-medium">Cage size</span>
+                <label className="text-sm text-slate-200" htmlFor="cubeCage">
+                  <span className="block text-xs font-medium text-slate-400">Cage</span>
                   <input
                     id="cubeCage"
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-slate-50 outline-none transition focus:border-sky-400"
                     min="10"
                     max="5000"
                     type="number"
@@ -742,60 +772,81 @@ export function BrickBuilderStudio() {
                     onChange={(event) => setCubeCage(event.target.value)}
                   />
                 </label>
+              </div>
 
-                <label className="space-y-2 text-sm text-slate-200 sm:col-span-2 xl:col-span-1" htmlFor="fileName">
-                  <span className="block font-medium">Export file name</span>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
+                  <input
+                    checked={splitPlacementsFromTotalSteps}
+                    className="h-3.5 w-3.5 shrink-0 rounded border border-white/20 bg-black/30 accent-emerald-400"
+                    type="checkbox"
+                    onChange={(event) => setSplitPlacementsFromTotalSteps(event.target.checked)}
+                  />
+                  Split steps across builders
+                </label>
+                {splitPlacementsFromTotalSteps && (
+                  <span className="text-[0.65rem] text-slate-500">
+                    (total ÷ builders, remainder to first)
+                  </span>
+                )}
+              </div>
+            </CollapsibleSection>
+            <CollapsibleSection
+              title="Exports"
+              summary={
+                <>
+                  <span>{fileName}</span>
+                  {saveScad && <span>SCAD</span>}
+                </>
+              }
+            >
+              <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+                <label className="text-sm text-slate-200" htmlFor="fileName">
+                  <span className="block text-xs font-medium text-slate-400">Export file name</span>
                   <input
                     id="fileName"
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-slate-50 outline-none transition focus:border-sky-400"
                     type="text"
                     value={fileName}
                     onChange={(event) => setFileName(event.target.value)}
                   />
                 </label>
 
-                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200 sm:col-span-2 xl:col-span-2">
+                <label className="flex items-center gap-2 pb-0.5 text-xs text-slate-300">
                   <input
                     checked={saveScad}
                     className="h-4 w-4 accent-sky-400"
                     type="checkbox"
                     onChange={(event) => setSaveScad(event.target.checked)}
                   />
-                  Save an OpenSCAD export in `backend/exports/`
+                  Save SCAD to backend/exports/
                 </label>
               </div>
+              <p className="mt-3 text-xs text-slate-500">
+                Status, generate, and high-level simulation parameters. Builder rule sets and balance
+                sit in the Builders rail to the left; Run Diagnostics sits on the right. The Preview
+                workspace in the center is twice as wide as each rail so the 3D view stays primary.
+              </p>
             </CollapsibleSection>
           </StudioPanel>
 
           <div className="studio-shell-body">
-          <StudioPanel className="studio-builders-rail studio-side-rail space-y-4 p-4">
-              <CollapsibleSection
-                title="Builder Rule Sets"
-                description="Each builder runs against the same occupied grid, so collapsing each card keeps the rail readable."
-                defaultOpen
-                summary={<span>{builders.length} configured</span>}
-              >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium text-white">Rule set collection</p>
-                      <p className="text-xs leading-5 text-slate-400">
-                        Add or trim builders without losing sight of the preview workspace.
-                      </p>
-                    </div>
-                    <button
-                      className="rounded-full border border-sky-300/30 px-3 py-2 text-xs font-medium text-sky-200 transition hover:border-sky-200 hover:text-white"
-                      type="button"
-                      onClick={() =>
-                        setBuilders((currentBuilders) => [
-                          ...currentBuilders,
-                          createBuilder(currentBuilders.length),
-                        ])
-                      }
-                    >
-                      Add builder
-                    </button>
-                  </div>
+          <div className="studio-builders-rail studio-side-rail space-y-4">
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                <p className="text-sm font-medium text-white">Builders <span className="text-slate-400">({builders.length})</span></p>
+                <button
+                  className="rounded-full border border-sky-300/30 px-3 py-2 text-xs font-medium text-sky-200 transition hover:border-sky-200 hover:text-white"
+                  type="button"
+                  onClick={() =>
+                    setBuilders((currentBuilders) => [
+                      ...currentBuilders,
+                      createBuilder(currentBuilders.length),
+                    ])
+                  }
+                >
+                  Add builder
+                </button>
+              </div>
 
                   {builders.map((builder, index) => {
                     const shapeLabel = getOptionLabel(catalog.shapes, builder.shapeId);
@@ -808,7 +859,6 @@ export function BrickBuilderStudio() {
                       <CollapsibleSection
                         key={`${builder.id}-${index}`}
                         title={`Builder ${index + 1}`}
-                        description="Collapse finished rule cards to keep the Builders rail compact."
                         defaultOpen={index === 0}
                         summary={
                           <>
@@ -844,6 +894,104 @@ export function BrickBuilderStudio() {
                           </div>
 
                           <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Archetype</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.archetype}
+                                onChange={(event) =>
+                                  updateBuilder(index, { archetype: event.target.value })
+                                }
+                              >
+                                {archetypeOptions.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              {archetypeProfiles[builder.archetype] && (
+                                <details className="mt-1 group">
+                                  <summary className="cursor-pointer text-[0.65rem] text-slate-500 hover:text-slate-300 transition select-none">
+                                    details
+                                  </summary>
+                                  <div className="mt-1 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-slate-400 space-y-0.5">
+                                    <div title="The opening strategy the builder uses at the start of a run">
+                                      <span className="text-slate-500">Strategy:</span> {archetypeProfiles[builder.archetype].initialStrategy}
+                                    </div>
+                                    <div title="Other strategies this archetype is allowed to switch to mid-run based on game state">
+                                      <span className="text-slate-500">Shifts:</span> {archetypeProfiles[builder.archetype].allowedStrategyShifts.join(", ")}
+                                    </div>
+                                    <div title="Mirror or rotational symmetry applied to placements (e.g. mirror_x reflects across the X axis)">
+                                      <span className="text-slate-500">Symmetry:</span> {archetypeProfiles[builder.archetype].symmetryMode}
+                                    </div>
+                                    <div title="Scoring weights that determine how the builder evaluates candidate placements — higher values mean that category matters more">
+                                      <span className="text-slate-500">Weights:</span>{" "}
+                                      {Object.entries(archetypeProfiles[builder.archetype].defaultObjectiveWeights).map(([k, v]) => (
+                                        <span key={k} className="mr-1.5 inline-block" title={`${k}: how much this archetype values ${k} when scoring placements (weight ${v})`}>
+                                          {k}:{v}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </details>
+                              )}
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Selection mode</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.selectionMode}
+                                onChange={(event) =>
+                                  updateBuilder(index, { selectionMode: event.target.value })
+                                }
+                              >
+                                {SELECTION_MODE_OPTIONS.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Continuity</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.continuityMode}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    continuityMode: event.target.value,
+                                  })
+                                }
+                              >
+                                {catalog.continuityModes.map((mode) => (
+                                  <option key={mode.id} value={mode.id}>
+                                    {mode.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="space-y-2 text-sm text-slate-200">
+                              <span className="block font-medium">Failure policy</span>
+                              <select
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                value={builder.failurePolicy}
+                                onChange={(event) =>
+                                  updateBuilder(index, {
+                                    failurePolicy: event.target.value,
+                                  })
+                                }
+                              >
+                                {catalog.failurePolicies.map((policy) => (
+                                  <option key={policy.id} value={policy.id}>
+                                    {policy.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
                             <label className="space-y-2 text-sm text-slate-200">
                               <span className="block font-medium">Id</span>
                               <input
@@ -907,7 +1055,8 @@ export function BrickBuilderStudio() {
                             <label className="space-y-2 text-sm text-slate-200">
                               <span className="block font-medium">Placements</span>
                               <input
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
+                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={splitPlacementsFromTotalSteps}
                                 min="0"
                                 max="2000"
                                 type="number"
@@ -921,44 +1070,6 @@ export function BrickBuilderStudio() {
                             </label>
 
                             <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Failure policy</span>
-                              <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                value={builder.failurePolicy}
-                                onChange={(event) =>
-                                  updateBuilder(index, {
-                                    failurePolicy: event.target.value,
-                                  })
-                                }
-                              >
-                                {catalog.failurePolicies.map((policy) => (
-                                  <option key={policy.id} value={policy.id}>
-                                    {policy.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Continuity</span>
-                              <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                value={builder.continuityMode}
-                                onChange={(event) =>
-                                  updateBuilder(index, {
-                                    continuityMode: event.target.value,
-                                  })
-                                }
-                              >
-                                {catalog.continuityModes.map((mode) => (
-                                  <option key={mode.id} value={mode.id}>
-                                    {mode.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200 sm:col-span-2">
                               <span className="block font-medium">Backtrack depth</span>
                               <input
                                 className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
@@ -972,48 +1083,6 @@ export function BrickBuilderStudio() {
                                   })
                                 }
                               />
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Archetype</span>
-                              <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                value={builder.archetype}
-                                onChange={(event) =>
-                                  updateBuilder(index, { archetype: event.target.value })
-                                }
-                              >
-                                {archetypeOptions.map((option) => (
-                                  <option key={option.id} value={option.id}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                              {archetypeProfiles[builder.archetype] && (
-                                <div className="mt-1 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-slate-400 space-y-0.5">
-                                  <div><span className="text-slate-500">Strategy:</span> {archetypeProfiles[builder.archetype].initialStrategy}</div>
-                                  <div><span className="text-slate-500">Shifts:</span> {archetypeProfiles[builder.archetype].allowedStrategyShifts.join(", ")}</div>
-                                  <div><span className="text-slate-500">Symmetry:</span> {archetypeProfiles[builder.archetype].symmetryMode}</div>
-                                  <div><span className="text-slate-500">Weights:</span> {Object.entries(archetypeProfiles[builder.archetype].defaultObjectiveWeights).map(([k, v]) => `${k}:${v}`).join("  ")}</div>
-                                </div>
-                              )}
-                            </label>
-
-                            <label className="space-y-2 text-sm text-slate-200">
-                              <span className="block font-medium">Selection mode</span>
-                              <select
-                                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-slate-50 outline-none transition focus:border-sky-400"
-                                value={builder.selectionMode}
-                                onChange={(event) =>
-                                  updateBuilder(index, { selectionMode: event.target.value })
-                                }
-                              >
-                                {SELECTION_MODE_OPTIONS.map((option) => (
-                                  <option key={option.id} value={option.id}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
                             </label>
 
                             <label className="space-y-2 text-sm text-slate-200">
@@ -1078,8 +1147,6 @@ export function BrickBuilderStudio() {
                       </CollapsibleSection>
                     );
                   })}
-                </div>
-              </CollapsibleSection>
 
               <CollapsibleSection
                 title="Balance matchups"
@@ -1169,7 +1236,7 @@ export function BrickBuilderStudio() {
                   )}
                 </div>
               </CollapsibleSection>
-          </StudioPanel>
+          </div>
 
           <div className="studio-center studio-preview-workspace space-y-5">
             <StudioPanel className="p-4 lg:p-5">
@@ -1282,6 +1349,75 @@ export function BrickBuilderStudio() {
 
             <div className="mt-4 space-y-4">
                 <CollapsibleSection
+                  title="Builder Scores"
+                  description="Per-builder scores and strategy state."
+                  defaultOpen
+                  summary={result ? <span>{result.builderStates.length} builders</span> : <span>No run yet</span>}
+                >
+                  {result?.builderStates && result.builderStates.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {result.builderStates.map((bs) => (
+                        <div key={bs.id} className="space-y-2 rounded-xl border border-white/10 bg-black/30 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-xs font-semibold text-slate-100">{bs.id}</span>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                              bs.status === "active" ? "bg-green-500/20 text-green-300" :
+                              bs.status === "completed" ? "bg-sky-500/20 text-sky-300" :
+                              "bg-red-500/20 text-red-300"
+                            }`}>{bs.status}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-1.5 text-center">
+                            <div className="min-w-0">
+                              <div className="font-mono text-xs tabular-nums leading-snug text-slate-100">
+                                {typeof bs.score === "number" ? bs.score.toFixed(1) : "—"}
+                              </div>
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Score</div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-mono text-xs tabular-nums leading-snug text-slate-100">
+                                {bs.placementCount}
+                              </div>
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Placements</div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate font-mono text-[11px] leading-snug text-slate-200" title={bs.currentStrategy ?? undefined}>
+                                {bs.currentStrategy ?? "—"}
+                              </div>
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Strategy</div>
+                            </div>
+                          </div>
+                          {bs.scoreBreakdown && Object.keys(bs.scoreBreakdown).length > 0 && (
+                            <div className="space-y-0.5 border-t border-white/5 pt-2">
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Breakdown</div>
+                              <div className="grid grid-cols-1 gap-0.5 text-[11px] sm:grid-cols-2">
+                                {Object.entries(bs.scoreBreakdown).map(([cat, val]) => (
+                                  <div key={cat} className="flex justify-between gap-2">
+                                    <span className="min-w-0 truncate text-slate-400">{cat}</span>
+                                    <span className="shrink-0 font-mono tabular-nums text-slate-200">
+                                      {typeof val === "number" ? val.toFixed(2) : val}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {bs.archetype && (
+                            <div className="text-[11px] leading-snug text-slate-500">
+                              Archetype: <span className="text-slate-400">{bs.archetype}</span>
+                              {bs.symmetryMode && bs.symmetryMode !== "none" && (
+                                <span> · Sym: {bs.symmetryMode}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">Run the generator to see builder scores.</p>
+                  )}
+                </CollapsibleSection>
+
+                <CollapsibleSection
                   title="Run Summary"
                   description="API target, result metrics, and export actions."
                   defaultOpen
@@ -1361,66 +1497,6 @@ export function BrickBuilderStudio() {
                     emptyLabel="Run the generator to inspect the builder configs used for the latest result."
                     value={result?.builders}
                   />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="Builder Scores"
-                  description="Per-builder scores and strategy state."
-                  summary={result ? <span>{result.builderStates.length} builders</span> : <span>No run yet</span>}
-                >
-                  {result?.builderStates && result.builderStates.length > 0 ? (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {result.builderStates.map((bs) => (
-                        <div key={bs.id} className="rounded-xl border border-white/10 bg-black/30 p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-slate-100">{bs.id}</span>
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              bs.status === "active" ? "bg-green-500/20 text-green-300" :
-                              bs.status === "completed" ? "bg-sky-500/20 text-sky-300" :
-                              "bg-red-500/20 text-red-300"
-                            }`}>{bs.status}</span>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2 text-center">
-                            <div>
-                              <div className="text-lg font-bold text-slate-50">{typeof bs.score === "number" ? bs.score.toFixed(1) : "—"}</div>
-                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Total Score</div>
-                            </div>
-                            <div>
-                              <div className="text-lg font-bold text-slate-50">{bs.placementCount}</div>
-                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Placements</div>
-                            </div>
-                            <div>
-                              <div className="text-lg font-bold text-slate-50">{bs.currentStrategy ?? "—"}</div>
-                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Strategy</div>
-                            </div>
-                          </div>
-                          {bs.scoreBreakdown && Object.keys(bs.scoreBreakdown).length > 0 && (
-                            <div className="space-y-1">
-                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Score Breakdown</div>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
-                                {Object.entries(bs.scoreBreakdown).map(([cat, val]) => (
-                                  <div key={cat} className="flex justify-between">
-                                    <span className="text-slate-400">{cat}</span>
-                                    <span className="font-mono text-slate-200">{typeof val === "number" ? val.toFixed(2) : val}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {bs.archetype && (
-                            <div className="text-xs text-slate-500">
-                              Archetype: <span className="text-slate-400">{bs.archetype}</span>
-                              {bs.symmetryMode && bs.symmetryMode !== "none" && (
-                                <span> · Sym: {bs.symmetryMode}</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-500">Run the generator to see builder scores.</p>
-                  )}
                 </CollapsibleSection>
 
                 <CollapsibleSection
