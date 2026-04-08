@@ -114,6 +114,51 @@ body {
 }
 
 
+/* Progress bar inside StatusLight – glows to match the LED tone. */
+.loupe-progress-track {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.loupe-progress-bar {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: loupe-progress-sweep 1.6s ease-in-out infinite;
+}
+
+.loupe-progress-bar--warn {
+  background: linear-gradient(90deg, transparent 0%, rgb(251 191 36 / 0.25) 40%, rgb(251 191 36 / 0.45) 60%, transparent 100%);
+  box-shadow: inset 0 0 12px rgb(251 191 36 / 0.15);
+}
+
+.loupe-progress-bar--good {
+  background: linear-gradient(90deg, transparent 0%, rgb(132 255 0 / 0.2) 40%, rgb(132 255 0 / 0.35) 60%, transparent 100%);
+  box-shadow: inset 0 0 12px rgb(132 255 0 / 0.12);
+}
+
+.loupe-progress-bar--bad {
+  background: linear-gradient(90deg, transparent 0%, rgb(248 113 113 / 0.25) 40%, rgb(248 113 113 / 0.45) 60%, transparent 100%);
+  box-shadow: inset 0 0 12px rgb(248 113 113 / 0.15);
+}
+
+.loupe-progress-bar--info {
+  background: linear-gradient(90deg, transparent 0%, rgb(56 189 248 / 0.2) 40%, rgb(56 189 248 / 0.35) 60%, transparent 100%);
+  box-shadow: inset 0 0 12px rgb(56 189 248 / 0.12);
+}
+
+.loupe-progress-bar--neutral {
+  background: linear-gradient(90deg, transparent 0%, rgb(148 163 184 / 0.15) 40%, rgb(148 163 184 / 0.3) 60%, transparent 100%);
+  box-shadow: inset 0 0 12px rgb(148 163 184 / 0.1);
+}
+
+@keyframes loupe-progress-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 /* Brick Builder Studio: Run & export bar + 3-column body (1:2:1, see .cursor/rules/design-system.mdc). */
 .studio-shell {
   display: flex;
@@ -125,6 +170,7 @@ body {
 
 .studio-shell-top {
   flex-shrink: 0;
+  border-radius: 0 0 1.5rem 1.5rem;
 }
 
 .studio-shell-body {
@@ -136,8 +182,8 @@ body {
 
 .studio-side-rail {
   position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
+  top: 5rem;
+  max-height: calc(100vh - 6rem);
   overflow-y: auto;
 }
 

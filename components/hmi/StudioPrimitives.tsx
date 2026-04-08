@@ -50,6 +50,8 @@ export function PanelHeader({
 
 type CollapsibleSectionProps = {
   title: string;
+  titleTooltip?: string;
+  titleClassName?: string;
   description?: string;
   summary?: ReactNode;
   defaultOpen?: boolean;
@@ -60,6 +62,8 @@ type CollapsibleSectionProps = {
 
 export function CollapsibleSection({
   title,
+  titleTooltip,
+  titleClassName,
   description,
   summary,
   defaultOpen = false,
@@ -81,7 +85,9 @@ export function CollapsibleSection({
             <span className="loupe-summary-indicator" aria-hidden="true">
               &rsaquo;
             </span>
-            <span className="text-sm font-semibold tracking-wide text-white">{title}</span>
+            <span className={titleClassName ?? "text-sm font-semibold tracking-wide text-white"}>
+              {titleTooltip ? <Tooltip text={titleTooltip}>{title}</Tooltip> : title}
+            </span>
           </div>
           {description ? <p className="pl-6 text-xs leading-5 text-slate-400">{description}</p> : null}
         </div>
@@ -98,14 +104,20 @@ type StatusLightProps = {
   label: string;
   tone?: "neutral" | "good" | "warn" | "bad" | "info";
   value?: ReactNode;
+  progress?: boolean;
 };
 
-export function StatusLight({ label, tone = "neutral", value }: StatusLightProps) {
+export function StatusLight({ label, tone = "neutral", value, progress }: StatusLightProps) {
   return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-slate-200">
+    <div className="relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-slate-200">
+      {progress && (
+        <span className="loupe-progress-track">
+          <span className={cx("loupe-progress-bar", `loupe-progress-bar--${tone}`)} />
+        </span>
+      )}
       <span className={cx("loupe-led", `loupe-led--${tone}`)} aria-hidden="true" />
-      <span className="font-medium text-slate-100">{label}</span>
-      {value ? <span className="text-slate-400">{value}</span> : null}
+      <span className="relative font-medium text-slate-100">{label}</span>
+      {value ? <span className="relative text-slate-400">{value}</span> : null}
     </div>
   );
 }
