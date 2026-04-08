@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BrickPreviewCanvas, type BrickRecord } from "@/components/BrickPreviewCanvas";
+import { ShapeEditorCanvas, type PlacementRulePaint } from "@/components/ShapeEditorCanvas";
 import {
   CollapsibleSection,
   JsonBlock,
@@ -30,6 +31,11 @@ type BuilderInput = {
   initialStrategy: string;
   allowedStrategyShifts: string[];
   shiftsEnabled: boolean;
+  shiftPillarThreshold: string;
+  shiftReinforceThreshold: string;
+  shiftWrapThreshold: string;
+  customRule: PlacementRulePaint;
+  prioritizeShapes: boolean;
 };
 
 type CatalogOption = {
@@ -198,6 +204,10 @@ const DEFAULT_CATALOG: CatalogResponse = {
       id: "alternating_sideways_vertical",
       label: "Alternating Sideways / Vertical",
     },
+    {
+      id: "alternating_with_support",
+      label: "Alternating + Pillar Support",
+    },
     { id: "competitive_growth", label: "Competitive Growth" },
   ],
   failurePolicies: [
@@ -326,6 +336,11 @@ function toBuilderInput(
     initialStrategy: builder.initialStrategy ?? profile?.initialStrategy ?? "expand",
     allowedStrategyShifts: builder.allowedStrategyShifts ?? [...(profile?.allowedStrategyShifts ?? [])],
     shiftsEnabled: (builder.allowedStrategyShifts ?? profile?.allowedStrategyShifts ?? []).length > 0,
+    shiftPillarThreshold: "2",
+    shiftReinforceThreshold: "8",
+    shiftWrapThreshold: "2",
+    customRule: { cube1Offsets: [], cube2Offsets: [] },
+    prioritizeShapes: false,
   };
 }
 
@@ -350,6 +365,11 @@ function createBuilder(index: number): BuilderInput {
     initialStrategy: arch?.initialStrategy ?? "expand",
     allowedStrategyShifts: [...(arch?.allowedStrategyShifts ?? [])],
     shiftsEnabled: (arch?.allowedStrategyShifts ?? []).length > 0,
+    shiftPillarThreshold: "2",
+    shiftReinforceThreshold: "8",
+    shiftWrapThreshold: "2",
+    customRule: { cube1Offsets: [], cube2Offsets: [] },
+    prioritizeShapes: false,
   };
 }
 
@@ -407,6 +427,9 @@ function buildSimulationBuildersPayload(builders: BuilderInput[]) {
       allowedStrategyShifts: builder.shiftsEnabled ? builder.allowedStrategyShifts : [],
       initialStrategy: builder.initialStrategy || null,
       buildabilityProfile: {},
+      shiftPillarThreshold: Number(builder.shiftPillarThreshold) || 2,
+      shiftReinforceThreshold: Number(builder.shiftReinforceThreshold) || 8,
+      shiftWrapThreshold: Number(builder.shiftWrapThreshold) || 2,
     });
   }
   return { ok: true as const, builders: payload };
@@ -1176,7 +1199,100 @@ export function BrickBuilderStudio() {
                                   )}
                                 </div>
                               </div>
+
+                              {builder.shiftsEnabled && (
+                                <div className="mt-3 space-y-2 border-t border-white/5 pt-3">
+                                  <span className="block text-xs font-medium text-slate-300">
+                                    <Tooltip text="Adjust when strategy shifts trigger. Lower values make them fire sooner; higher values require more extreme conditions before shifting.">Shift Thresholds</Tooltip>
+                                  </span>
+                                  {builder.allowedStrategyShifts.includes("pillar") && (
+                                    <label className="flex items-center gap-3 text-xs text-slate-400">
+                                      <span className="w-28 shrink-0">
+                                        <Tooltip text="Shift to Pillar when cantilever + unsupported height reaches this value. Lower = more cautious about structural risk.">Pillar (support risk)</Tooltip>
+                                      </span>
+                                      <input
+                                        type="range"
+                                        min="1"
+                                        max="10"
+                                        step="1"
+                                        value={builder.shiftPillarThreshold}
+                                        className="flex-1 accent-sky-400"
+                                        onChange={(e) => updateBuilder(index, { shiftPillarThreshold: e.target.value })}
+                                      />
+                                      <span className="w-6 text-right font-mono text-slate-300">{builder.shiftPillarThreshold}</span>
+                                    </label>
+                                  )}
+                                  {builder.allowedStrategyShifts.includes("reinforce") && (
+                                    <label className="flex items-center gap-3 text-xs text-slate-400">
+                                      <span className="w-28 shrink-0">
+                                        <Tooltip text="Shift to Reinforce when exposed faces reaches this value. Lower = thickens structure sooner; higher = lets it stay branchy.">Reinforce (faces)</Tooltip>
+                                      </span>
+                                      <input
+                                        type="range"
+                                        min="2"
+                                        max="20"
+                                        step="1"
+                                        value={builder.shiftReinforceThreshold}
+                                        className="flex-1 accent-sky-400"
+                                        onChange={(e) => updateBuilder(index, { shiftReinforceThreshold: e.target.value })}
+                                      />
+                                      <span className="w-6 text-right font-mono text-slate-300">{builder.shiftReinforceThreshold}</span>
+                                    </label>
+                                  )}
+                                  {builder.allowedStrategyShifts.includes("wrap") && (
+                                    <label className="flex items-center gap-3 text-xs text-slate-400">
+                                      <span className="w-28 shrink-0">
+                                        <Tooltip text="Shift to Wrap when enemy neighbor count reaches this value. Lower = reacts faster to nearby opponents.">Wrap (enemies)</Tooltip>
+                                      </span>
+                                      <input
+                                        type="range"
+                                        min="1"
+                                        max="10"
+                                        step="1"
+                                        value={builder.shiftWrapThreshold}
+                                        className="flex-1 accent-sky-400"
+                                        onChange={(e) => updateBuilder(index, { shiftWrapThreshold: e.target.value })}
+                                      />
+                                      <span className="w-6 text-right font-mono text-slate-300">{builder.shiftWrapThreshold}</span>
+                                    </label>
+                                  )}
+                                </div>
+                              )}
                             </div>
+
+                          <CollapsibleSection
+                            className="sm:col-span-2"
+                            title="Placement Rule Editor"
+                            defaultOpen={false}
+                            summary={
+                              <>
+                                <span className="text-green-400">{builder.customRule.cube1Offsets.length} C1</span>
+                                <span className="text-blue-400">{builder.customRule.cube2Offsets.length} C2</span>
+                                {builder.prioritizeShapes && <span>prioritized</span>}
+                              </>
+                            }
+                          >
+                            <div className="space-y-3">
+                              <p className="text-[10px] leading-relaxed text-slate-500">
+                                Paint <span className="text-green-400">green</span> cells where the first cube of the next brick can go (relative to the previous brick).
+                                Then paint <span className="text-blue-400">blue</span> cells where the second cube can go (relative to Cube 1).
+                                Click a cell to paint it; click again to remove.
+                              </p>
+                              <ShapeEditorCanvas
+                                value={builder.customRule}
+                                onChange={(next) => updateBuilder(index, { customRule: next })}
+                              />
+                              <label className="flex items-center gap-2 text-xs text-slate-400">
+                                <input
+                                  type="checkbox"
+                                  checked={builder.prioritizeShapes}
+                                  className="h-3.5 w-3.5 shrink-0 rounded border border-white/20 bg-black/30 accent-sky-400"
+                                  onChange={(e) => updateBuilder(index, { prioritizeShapes: e.target.checked })}
+                                />
+                                <Tooltip text="When checked, the builder tries shapes in order of priority. When unchecked, all shapes are evaluated equally and the best-scoring one wins.">Prioritize shapes</Tooltip>
+                              </label>
+                            </div>
+                          </CollapsibleSection>
 
                           <CollapsibleSection
                             className="sm:col-span-2"

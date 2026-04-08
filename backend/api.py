@@ -91,6 +91,9 @@ class GenerateRequest(BaseModel):
         )
         symmetryMode: str = "none"
         selectionMode: str = "legacy"
+        shiftPillarThreshold: int = Field(default=2, ge=0, le=20)
+        shiftReinforceThreshold: int = Field(default=8, ge=0, le=30)
+        shiftWrapThreshold: int = Field(default=2, ge=0, le=20)
 
     totalSteps: int = Field(default=200, ge=1, le=2000)
     cubeCage: int = Field(default=200, ge=10, le=5000)
@@ -128,6 +131,9 @@ def builder_request_to_sim_payload(
         "buildabilityProfile": builder.buildabilityProfile.model_dump(exclude_none=True),
         "symmetryMode": builder.symmetryMode,
         "selectionMode": builder.selectionMode,
+        "shiftPillarThreshold": builder.shiftPillarThreshold,
+        "shiftReinforceThreshold": builder.shiftReinforceThreshold,
+        "shiftWrapThreshold": builder.shiftWrapThreshold,
     }
 
 

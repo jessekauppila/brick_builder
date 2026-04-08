@@ -8,6 +8,7 @@ from .shapes import HORIZONTAL_ORIENTATIONS, Vector3
 
 PLACEMENT_RULES = {
     "alternating_sideways_vertical": "Alternating Sideways / Vertical",
+    "alternating_with_support": "Alternating + Pillar Support",
     "competitive_growth": "Competitive Growth",
 }
 
@@ -53,6 +54,17 @@ def build_candidates(
             rng=rng,
             brick_unit=brick_unit,
             local_step=local_step,
+        )
+
+    if placement_rule_id == "alternating_with_support":
+        return _build_alternating_with_support_candidates(
+            previous_anchor=previous_anchor,
+            previous_orientation=previous_orientation,
+            start_anchor=start_anchor,
+            rng=rng,
+            brick_unit=brick_unit,
+            local_step=local_step,
+            strategy_id=strategy_id,
         )
 
     if placement_rule_id == "competitive_growth":
@@ -105,6 +117,105 @@ def _build_alternating_candidates(
     vertical_deltas = list(VERTICAL_DELTAS)
     rng.shuffle(vertical_deltas)
     orientation = previous_orientation or "east"
+    return [
+        PlacementCandidate(
+            anchor=_translate(previous_anchor, delta, brick_unit),
+            orientation=orientation,
+            mode="vertical",
+        )
+        for delta in vertical_deltas
+    ]
+
+
+def _build_alternating_with_support_candidates(
+    previous_anchor: Optional[Vector3],
+    previous_orientation: Optional[str],
+    start_anchor: Vector3,
+    rng: Random,
+    brick_unit: int,
+    local_step: int,
+    strategy_id: str,
+) -> list[PlacementCandidate]:
+    """Alternate sideways/vertical like the basic rule, but when the strategy
+    shifts to ``pillar`` (structural problem detected by the builder agent),
+    generate pillar-down candidates to build support before resuming."""
+    if previous_anchor is None:
+        seed_orientation = rng.choice(HORIZONTAL_ORIENTATIONS)
+        return [
+            PlacementCandidate(
+                anchor=start_anchor,
+                orientation=seed_orientation,
+                mode="seed",
+            )
+        ]
+
+    orientation = previous_orientation or "east"
+
+    if strategy_id == "pillar":
+        candidates: list[PlacementCandidate] = [
+            PlacementCandidate(
+                anchor=_translate(previous_anchor, (0, 0, -1), brick_unit),
+                orientation=orientation,
+                mode="pillar_down",
+            ),
+        ]
+        horiz = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0)]
+        rng.shuffle(horiz)
+        for delta in horiz:
+            candidates.append(
+                PlacementCandidate(
+                    anchor=_translate(previous_anchor, delta, brick_unit),
+                    orientation=orientation,
+                    mode="brace",
+                )
+            )
+        candidates.append(
+            PlacementCandidate(
+                anchor=_translate(previous_anchor, (0, 0, 1), brick_unit),
+                orientation=orientation,
+                mode="pillar_up",
+            )
+        )
+        return candidates
+
+    if strategy_id == "reinforce":
+        candidates = []
+        vert = [(0, 0, -1), (0, 0, 1)]
+        rng.shuffle(vert)
+        for delta in vert:
+            candidates.append(
+                PlacementCandidate(
+                    anchor=_translate(previous_anchor, delta, brick_unit),
+                    orientation=orientation,
+                    mode="brace",
+                )
+            )
+        horiz = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0)]
+        rng.shuffle(horiz)
+        for delta in horiz:
+            candidates.append(
+                PlacementCandidate(
+                    anchor=_translate(previous_anchor, delta, brick_unit),
+                    orientation=orientation,
+                    mode="thicken",
+                )
+            )
+        return candidates
+
+    if local_step % 2 == 1:
+        directions = list(HORIZONTAL_ORIENTATIONS)
+        rng.shuffle(directions)
+        return [
+            PlacementCandidate(
+                anchor=_translate(previous_anchor, HORIZONTAL_DELTAS[direction], brick_unit),
+                orientation=direction,
+                mode="sideways",
+            )
+            for direction in directions
+        ]
+
+    vertical_deltas = list(VERTICAL_DELTAS)
+    rng.shuffle(vertical_deltas)
     return [
         PlacementCandidate(
             anchor=_translate(previous_anchor, delta, brick_unit),

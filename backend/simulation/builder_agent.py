@@ -135,6 +135,9 @@ class BuilderAgent:
         self.buildability_profile.update(config.buildability_profile)
         self.symmetry_mode = config.symmetry_mode or profile.symmetry_mode
         self.selection_mode = getattr(config, "selection_mode", "legacy")
+        self.shift_pillar_threshold = getattr(config, "shift_pillar_threshold", 2)
+        self.shift_reinforce_threshold = getattr(config, "shift_reinforce_threshold", 8)
+        self.shift_wrap_threshold = getattr(config, "shift_wrap_threshold", 2)
         self.placement_count = 0
         self.last_anchor: Optional[Vector3] = None
         self.last_orientation: Optional[str] = None
@@ -520,11 +523,11 @@ class BuilderAgent:
             else 0
         )
 
-        if "wrap" in available and enemy_pressure >= 2:
+        if "wrap" in available and enemy_pressure >= self.shift_wrap_threshold:
             desired = "wrap"
-        elif "pillar" in available and support_risk >= 2:
+        elif "pillar" in available and support_risk >= self.shift_pillar_threshold:
             desired = "pillar"
-        elif "reinforce" in available and self.last_analysis and self.last_analysis.exposed_faces >= 8:
+        elif "reinforce" in available and self.last_analysis and self.last_analysis.exposed_faces >= self.shift_reinforce_threshold:
             desired = "reinforce"
         elif "expand" in available:
             desired = "expand"

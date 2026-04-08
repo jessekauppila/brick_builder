@@ -46,6 +46,9 @@ class BuilderConfig:
     buildability_profile: dict[str, int | bool] = field(default_factory=dict)
     symmetry_mode: str = "none"
     selection_mode: str = "legacy"
+    shift_pillar_threshold: int = 2
+    shift_reinforce_threshold: int = 8
+    shift_wrap_threshold: int = 2
 
     def to_dict(self):
         return {
@@ -65,6 +68,9 @@ class BuilderConfig:
             "buildabilityProfile": self.buildability_profile,
             "symmetryMode": self.symmetry_mode,
             "selectionMode": self.selection_mode,
+            "shiftPillarThreshold": self.shift_pillar_threshold,
+            "shiftReinforceThreshold": self.shift_reinforce_threshold,
+            "shiftWrapThreshold": self.shift_wrap_threshold,
         }
 
 
@@ -218,6 +224,18 @@ class BrickModel:
                         "selection_mode",
                         builder.get("selectionMode", "legacy"),
                     ),
+                    shift_pillar_threshold=builder.get(
+                        "shift_pillar_threshold",
+                        builder.get("shiftPillarThreshold", 2),
+                    ),
+                    shift_reinforce_threshold=builder.get(
+                        "shift_reinforce_threshold",
+                        builder.get("shiftReinforceThreshold", 8),
+                    ),
+                    shift_wrap_threshold=builder.get(
+                        "shift_wrap_threshold",
+                        builder.get("shiftWrapThreshold", 2),
+                    ),
                 )
 
             if config.id in seen_ids:
@@ -301,6 +319,9 @@ class BrickModel:
                     buildability_profile=merged_buildability,
                     symmetry_mode=symmetry_mode,
                     selection_mode=config.selection_mode,
+                    shift_pillar_threshold=config.shift_pillar_threshold,
+                    shift_reinforce_threshold=config.shift_reinforce_threshold,
+                    shift_wrap_threshold=config.shift_wrap_threshold,
                 )
             )
             seen_ids.add(config.id)
